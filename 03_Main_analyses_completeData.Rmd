@@ -13,7 +13,7 @@ load("data/combinedData_new.RData") # non-imputed data
 ```
 
 
-# Univariate models (one PGS per model)
+# Measurement models
 ```{r}
 library(dplyr)
 library(lavaan)
