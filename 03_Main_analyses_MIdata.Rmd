@@ -1,0 +1,1020 @@
+---
+title: "03_Main_analyses_MIdata"
+author: "Leonard Frach"
+date: "02 08 2023"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# read data from multiple imputation
+```{r}
+setwd("N:/durable/people/Leo/conduct/v1")
+
+load("data/MIfull_with_IDs.RData")
+load("data/MIfull.RData")
+load("data/MIdata.Rdata") # non-imputed data
+
+
+# # Use Lavaan to run model on previously imputed data:
+# 
+# options(download.file.method="libcurl")
+#install.packages("lavaan.survey", repos = "https://cran.tsd.usit.no")
+# 
+library("dplyr")
+library("survey")
+library("mitools")
+library("semTools")
+library("lavaan")
+library("lavaan.survey")
+
+# add IDs to data frame 
+MIfull$data$PREG_ID_2306 <- MIdata$PREG_ID_2306
+
+# add IDs to imputed data
+
+for(i in 1:100) {
+  mice.imp[[i]]$PREG_ID_2306 <- MIdata$PREG_ID_2306
+}
+
+
+# Recode factors as ordered for lavaan 
+
+for(i in 1:100) {
+  levels(mice.imp[[i]]$KJONN) <- c("Male", "Female")
+}
+
+for(i in 1:100) {
+  mice.imp[[i]]$NN111 <- as.ordered(mice.imp[[i]]$NN111)
+}
+
+for(i in 1:100) {
+  mice.imp[[i]]$NN112 <- as.ordered(mice.imp[[i]]$NN112)
+}
+
+for(i in 1:100) {
+  mice.imp[[i]]$NN113 <- as.ordered(mice.imp[[i]]$NN113)
+}
+
+for(i in 1:100) {
+  mice.imp[[i]]$NN114 <- as.ordered(mice.imp[[i]]$NN114)
+}
+
+for(i in 1:100) {
+  mice.imp[[i]]$NN115 <- as.ordered(mice.imp[[i]]$NN115)
+}
+
+for(i in 1:100) {
+  mice.imp[[i]]$NN116 <- as.ordered(mice.imp[[i]]$NN116)
+}
+
+for(i in 1:100) {
+  mice.imp[[i]]$NN117 <- as.ordered(mice.imp[[i]]$NN117)
+}
+
+for(i in 1:100) {
+  mice.imp[[i]]$NN118 <- as.ordered(mice.imp[[i]]$NN118)
+}
+
+
+# MIfull$imp$NN111 <- mice.imp$imp$NN111 %>% mutate_all(as.ordered)
+# MIfull$imp$NN112 <- mice.imp$imp$NN112 %>% mutate_all(as.ordered)
+# MIfull$imp$NN113 <- mice.imp$imp$NN113 %>% mutate_all(as.ordered)
+# MIfull$imp$NN114 <- mice.imp$imp$NN114 %>% mutate_all(as.ordered)
+# MIfull$imp$NN115 <- mice.imp$imp$NN115 %>% mutate_all(as.ordered)
+# MIfull$imp$NN116 <- mice.imp$imp$NN116 %>% mutate_all(as.ordered)
+# MIfull$imp$NN117 <- mice.imp$imp$NN117 %>% mutate_all(as.ordered)
+# MIfull$imp$NN118 <- mice.imp$imp$NN118 %>% mutate_all(as.ordered)
+
+
+
+# out_trioADHD <- runMI(trioADHD,
+#               data=mice.imp,
+#               fun="lavaan",
+#               meanstructure = TRUE)
+
+# out_trioADHD <- runMI(trioADHD,
+#                       data=mice.imp,
+#                       meanstructure = TRUE)
+# 
+# summary(out_trioADHD)
+# fitMeasures(out_trioADHD, "chisq")
+
+```
+
+# Write models using lavaan
+```{r}
+#list of all file names in the PRS folder
+wdir = "N:/durable/people/Leo/conduct/v1/data/PGS_LDpred2/" 
+vars <- list.files(wdir)
+# reorder 
+vars <- vars[c(1,3,11,7,5,13,6,8,10,2,4,12,9)]
+
+#save(vars, file = "data/vars.RData")
+
+#Suggested order (externalizing disorders, internalizing disorders, cognitive and socioeconomic, substance use, SU disorders, rest): 
+#ADHD, ASB, Anxiety, Depression, Cognitive Performance, Educational attainment, Income, Alcohol use, Cannabis use, Smoking, CUD, Age at first birth, Risk taking
+
+Role = c("Child","Father","Mother")
+(ps_scores <- expand.grid(Role, vars))
+
+# list of ps variables for prs.pc
+(pspc_scores <- c(paste0("PGS_", ps_scores[,2],"_res_", ps_scores[,1])))
+#write.csv(pspc_scores, file = "data/PGS.csv", row.names = F, quote = F)
+
+#scripts <- paste0(pspc_scores, ".R")
+#write(scripts, file = "PGSlist")
+
+#####################
+#####################
+
+
+# the models were run on the cluster using a batch array job instead of loop, with one R script for each PGS
+# models were the same as for the complete data analyses (see script model_SEM.R), but with functions for imputed data
+# see below for an example for the unadjusted models (one PGS per model)
+
+
+#empty results data frame
+# results_sem <- data.frame(matrix(NA, nrow = length(pspc_scores), ncol = 13))
+# 
+# for (i in 1:length(pspc_scores)) {
+#   set.seed(123)
+#   i = 1
+#   sem_uni =  c(
+#     #measurement model
+#     "conduct_lf =~ NN111 + NN112 + NN113 + NN114 + NN115 + NN116 + NN117 + NN118",
+#     #regression
+#     paste0("conduct_lf ~ e1*", pspc_scores[i]," + KJONN + FAAR")
+#   )
+#   
+#   
+#   timestamp()
+#   sem_fit <- sem.mi(mice.imp, model = sem_uni)
+#   timestamp()
+# 
+#   out_sem <- parameterEstimates(sem_fit, ci = T, standardized = T)
+#   
+#   results_sem[i, ] <- out_sem[out_sem$label == "e1", ]
+#   
+# }
+# 
+# 
+# out_sem <- summary(sem_fit, standardized = T, ci = T)
+# out_sem <- out_sem[out_sem$label == "e1", ]
+# 
+# 
+# # rownames
+# rownames(out_sem) <- PGS
+```
+
+
+# Descriptive statistics
+```{r}
+
+# get variables parental age (at birth), parental education and household income (at age 8)
+
+regPath = "N:/durable/data/MoBaPhenoData/PDB2306_MoBa_V12/SPSS/PDB2306_MBRN_541_v12.sav"
+
+mbrn <- foreign::read.spss(regPath, to.data.frame = TRUE) %>% 
+  select(PREG_ID_2306, BARN_NR, KJONN, FAAR, MORS_ALDER, FARS_ALDER)
+
+MIdata <- merge(MIdata, mbrn, all.x = T, all.y = F)
+
+Q1data <- foreign::read.spss(file='N:/durable/data/MoBaPhenoData/PDB2306_MoBa_v12/SPSS/PDB2306_Q1_v12.sav', to.data.frame = TRUE) %>%
+  select(PREG_ID_2306, AA1124, AA1126, AA1315, AA1316)  
+
+# father questionnaire
+
+FAR <- foreign::read.spss(file='N:/durable/data/MoBaPhenoData/PDB2306_MoBa_v12/SPSS/PDB2306_QF_v12.sav', to.data.frame = TRUE) %>%
+  select(PREG_ID_2306, FF16, FF341)
+
+MIdata <- merge(MIdata, FAR, all.x = T, all.y = F)
+
+# father income has "do not know" option - code as NA
+Q1data$AA1316 <- ifelse(Q1data$AA1316 == "Do not know", NA, Q1data$AA1316)
+Q1data$AA1316 <- Q1data$AA1316 - 1 
+
+MIdata <- merge(MIdata, Q1data, all.x = T, all.y = F)
+
+table(MIdata$MORS_ALDER)
+table(MIdata$FARS_ALDER)
+
+MIdata$MORS_ALDER <- dplyr::recode(MIdata$MORS_ALDER, `<17` = "17", `>45` = "45", .default = levels(MIdata$MORS_ALDER))
+MIdata$FARS_ALDER <- dplyr::recode(MIdata$FARS_ALDER, `< 18` = "18", `> 59` = "59", .default = levels(MIdata$FARS_ALDER))
+
+MIdata$MORS_ALDER <- as.numeric(MIdata$MORS_ALDER) + 16
+MIdata$FARS_ALDER <- as.numeric(MIdata$FARS_ALDER) + 17
+
+psych::describe(MIdata$MORS_ALDER)
+psych::describe(MIdata$FARS_ALDER)
+
+
+# missingness on items
+
+table(is.na(MIdata$NN111)) / nrow(MIdata)
+table(is.na(MIdata$NN112)) / nrow(MIdata)
+table(is.na(MIdata$NN113)) / nrow(MIdata)
+table(is.na(MIdata$NN114)) / nrow(MIdata)
+table(is.na(MIdata$NN115)) / nrow(MIdata)
+table(is.na(MIdata$NN116)) / nrow(MIdata)
+table(is.na(MIdata$NN117)) / nrow(MIdata)
+table(is.na(MIdata$NN118)) / nrow(MIdata)
+
+# missingness on all items
+(completePheno <- MIdata %>% 
+    mutate(across(NN111:NN118, ~ as.numeric(.))) %>% 
+    mutate(sum = rowSums(across(NN111:NN118), na.rm = F)) %>%
+    filter(sum > 0))
+nrow(completePheno)
+
+1 - nrow(completePheno) / nrow(MIdata)
+
+round(table(completePheno$KJONN) / nrow(completePheno), 3)
+
+
+#FALSE  TRUE 
+# 15301   16045   -> 15301  cases with data on all items
+
+# any item data
+(anyPheno <- MIdata %>% 
+    mutate(across(NN111:NN118, ~ as.numeric(.))) %>% 
+    mutate(sum = rowSums(across(NN111:NN118), na.rm = T)) %>%
+    filter(sum > 0))
+nrow(anyPheno)
+
+round(table(anyPheno$KJONN) / nrow(anyPheno), 3)
+
+1 - nrow(anyPheno) / nrow(MIdata)
+
+
+# 15477 individuals with any phenotype data
+
+table(is.na(MIdata$KJONN))
+
+# means and SDs
+(descript <- MIdata %>% 
+  select(NN111:NN118) %>% mutate_all(as.numeric) %>%
+  psych::describe())
+
+# percent female
+
+# full sample
+round(table(MIdata$KJONN) / nrow(MIdata), 3)
+
+# with item level data
+(descript2 <- MIdata %>%
+ mutate_at(c("NN111","NN112", "NN113","NN114","NN115","NN116","NN117","NN118"), as.numeric) %>%
+  group_by(KJONN) %>% select(NN111:NN118) %>% summarise())
+
+
+round(table(MIdata$KJONN[!is.na(MIdata$NN111)]) / sum(!is.na(MIdata$NN111)), 3) 
+round(table(MIdata$KJONN[!is.na(MIdata$NN112)]) / sum(!is.na(MIdata$NN112)), 3) 
+round(table(MIdata$KJONN[!is.na(MIdata$NN113)]) / sum(!is.na(MIdata$NN113)), 3) 
+round(table(MIdata$KJONN[!is.na(MIdata$NN114)]) / sum(!is.na(MIdata$NN114)), 3) 
+round(table(MIdata$KJONN[!is.na(MIdata$NN115)]) / sum(!is.na(MIdata$NN115)), 3) 
+round(table(MIdata$KJONN[!is.na(MIdata$NN116)]) / sum(!is.na(MIdata$NN116)), 3) 
+round(table(MIdata$KJONN[!is.na(MIdata$NN117)]) / sum(!is.na(MIdata$NN117)), 3) 
+round(table(MIdata$KJONN[!is.na(MIdata$NN118)]) / sum(!is.na(MIdata$NN118)), 3) 
+
+
+# maternal education
+(n <- sum(!is.na(MIdata$AA1124)))
+table(MIdata$AA1124)
+round(table(MIdata$AA1124) / n, 3)
+
+# paternal education
+(n <- sum(!is.na(MIdata$FF16)))
+table(MIdata$FF16)
+round(table(MIdata$FF16) / n, 3)
+
+# maternal income
+(n <- sum(!is.na(MIdata$AA1315)))
+table(MIdata$AA1315)
+round(table(MIdata$AA1315) / n, 3)
+
+# paternal income
+(n <- sum(!is.na(MIdata$FF341)))
+table(MIdata$FF341)
+round(table(MIdata$FF341) / n, 3)
+
+
+## descriptive statistics for subsample
+
+psych::describe(completePheno$MORS_ALDER)
+psych::describe(completePheno$FARS_ALDER)
+
+# maternal education
+(n <- sum(!is.na(completePheno$AA1124)))
+table(completePheno$AA1124)
+round(table(completePheno$AA1124) / n, 3)
+
+# paternal education
+(n <- sum(!is.na(completePheno$FF16)))
+table(completePheno$FF16)
+round(table(completePheno$FF16) / n, 3)
+
+
+## cronbach's alpha
+library(Hmisc)
+
+cd_scale <- MIdata %>% select("NN111":"NN118")
+
+# Alpha ordinal
+polycorr <- psych::polychoric(cd_scale)
+psych::alpha(polycorr$rho)
+
+# std. alpha = 0.88
+
+
+# load age 14y data
+load("N:/durable/people/Leo/conduct/v1/data/phenoData.RData")
+
+
+phenoData <- phenoData %>% select(c(PREG_ID_2306, BARN_NR, UB127:UB134))
+
+MIdata <- left_join(MIdata, phenoData)
+
+
+# missingness on items
+
+table(is.na(MIdata$UB127)) / nrow(MIdata)
+table(is.na(MIdata$UB128)) / nrow(MIdata)
+table(is.na(MIdata$UB129)) / nrow(MIdata)
+table(is.na(MIdata$UB130)) / nrow(MIdata)
+table(is.na(MIdata$UB131)) / nrow(MIdata)
+table(is.na(MIdata$UB132)) / nrow(MIdata)
+table(is.na(MIdata$UB133)) / nrow(MIdata)
+table(is.na(MIdata$UB134)) / nrow(MIdata)
+
+# missingness on all items
+(completePheno <- MIdata %>% 
+    mutate(across(UB127:UB134, ~ as.numeric(.))) %>% 
+    mutate(sum = rowSums(across(UB127:UB134), na.rm = F)) %>%
+    filter(sum > 0))
+nrow(completePheno)
+
+1 - nrow(completePheno) / nrow(MIdata)
+
+round(table(completePheno$KJONN) / nrow(completePheno), 3)
+
+
+# any item data
+(anyPheno <- MIdata %>% 
+    mutate(across(UB127:UB134, ~ as.numeric(.))) %>% 
+    mutate(sum = rowSums(across(UB127:UB134), na.rm = T)) %>%
+    filter(sum > 0))
+nrow(anyPheno)
+
+round(table(anyPheno$KJONN) / nrow(anyPheno), 3)
+
+1 - nrow(anyPheno) / nrow(MIdata)
+
+# 6266 individuals with any phenotype data
+
+
+
+# means and SDs
+(descript_14y <- MIdata %>% 
+  select(UB127:UB134) %>% mutate_all(as.numeric) %>%
+  psych::describe())
+
+
+############################
+
+motherPGSpc <- c(paste0("PGS_", vars, "_res_Mother"))
+fatherPGSpc <- c(paste0("PGS_", vars, "_res_Father"))
+childPGSpc <- c(paste0("PGS_", vars, "_res_Child"))
+
+cor_pgs_c <- MIdata %>% 
+  dplyr::select(contains(childPGSpc)) %>%
+  cor() %>%
+  round(2)
+
+
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+
+write.csv(cor_pgs_c, file = "cor_pgs_child.csv", quote = F)
+
+# fathers
+cor_pgs_f <- MIdata %>% 
+  dplyr::select(contains(fatherPGSpc)) %>%
+  cor() %>%
+  round(2)
+
+
+# mothers
+cor_pgs_m <- MIdata %>% 
+  dplyr::select(contains(motherPGSpc)) %>%
+  cor() %>%
+  round(2)
+
+
+
+# corr between mothers and fathers for PGS using first PC of all threshold scores
+for (i in 1:length(vars)) {
+  print(cor(MIdata[, motherPGSpc[i]], MIdata[, fatherPGSpc[i]], use="pairwise.complete.obs")) } # indicating assortative mating strongest for EA
+
+cor_pgs_trio <- matrix(nrow =  13, ncol = 3)
+
+# corr between mothers and fathers for PGS using first PC of all threshold scores
+for (i in 1:length(vars)) {
+  cor_pgs_trio[i, 1] <- cor(MIdata[, motherPGSpc[i]], MIdata[, fatherPGSpc[i]], use="pairwise.complete.obs") } # indicating assortative mating strongest for EA (0.14)
+
+# corr between mothers and children for PGS 
+for (i in 1:length(vars)) {
+  cor_pgs_trio[i, 2] <- cor(MIdata[, motherPGSpc[i]], MIdata[, childPGSpc[i]], use="pairwise.complete.obs") }
+
+# also highest correlation for EA (0.55)
+
+# corr between fathers and children for PGS 
+for (i in 1:length(vars)) {
+  cor_pgs_trio[i, 3] <- cor(MIdata[, fatherPGSpc[i]], MIdata[, childPGSpc[i]], use="pairwise.complete.obs") }
+
+colnames(cor_pgs_trio)[1:3] <- c("M_F", "M_C", "F_C")
+rownames(cor_pgs_trio) <- vars
+
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+write.csv(cor_pgs_trio, file = "correlations_trios.csv", quote = F)
+
+
+```
+
+# get descriptive info for the whole MoBa sample
+```{r}
+mbrn2 <- foreign::read.spss(regPath, to.data.frame = TRUE) 
+
+mbrn <- mbrn %>% mutate(PREG_ID_2306 = as.numeric(PREG_ID_2306))
+mbrn <- mbrn %>% arrange(PREG_ID_2306) %>% distinct(PREG_ID_2306, .keep_all = T)
+
+# parental age
+table(mbrn$MORS_ALDER)
+table(mbrn$FARS_ALDER)
+
+mbrn$MORS_ALDER <- dplyr::recode(mbrn$MORS_ALDER, `<17` = "17", `>45` = "45", .default = levels(mbrn$MORS_ALDER))
+mbrn$FARS_ALDER <- dplyr::recode(mbrn$FARS_ALDER, `< 18` = "18", `> 59` = "59", .default = levels(mbrn$FARS_ALDER))
+
+mbrn$MORS_ALDER <- as.numeric(mbrn$MORS_ALDER) + 16
+mbrn$FARS_ALDER <- as.numeric(mbrn$FARS_ALDER) + 17
+
+
+psych::describe(mbrn$MORS_ALDER)
+psych::describe(mbrn$FARS_ALDER)
+
+
+
+# maternal education
+
+Q1data <- Q1data %>% mutate(PREG_ID_2306 = as.numeric(PREG_ID_2306))
+Q1data <- Q1data %>% arrange(PREG_ID_2306) %>% distinct(PREG_ID_2306, .keep_all = T)
+
+(n <- sum(!is.na(Q1data$AA1124)))
+table(Q1data$AA1124)
+round(table(Q1data$AA1124) / n, 3)
+
+
+FAR <- FAR %>% mutate(PREG_ID_2306 = as.numeric(PREG_ID_2306))
+FAR <- FAR %>% arrange(PREG_ID_2306) %>% distinct(PREG_ID_2306, .keep_all = T)
+
+# paternal education
+(n <- sum(!is.na(FAR$FF16)))
+table(FAR$FF16)
+round(table(FAR$FF16) / n, 3)
+
+
+```
+
+
+# load paramater estimates
+```{r}
+MIdir = "N:/durable/people/Leo/conduct/v1/output/summarySEM/"
+modPE <- list.files(MIdir)
+modPE <- modPE[c(1:3,7:9,31:33,19:21,13:15,37:39,16:18,22:24,28:30,4:6,10:12,34:36,25:27)]
+
+setwd(MIdir)
+
+modelPEs <- rep(list(matrix(NA, nrow = 69, ncol = 15)), times = length(modPE))
+
+for (i in 1:length(modPE)) {
+  load(modPE[i])
+  modelPEs[[i]] <- out_sem
+}
+
+names(modelPEs) <- modPE
+
+results_sem_MI <- data.frame(matrix(NA, nrow = length(modelPEs), ncol = 15))
+
+for (i in 1:length(modPE)) {
+  modelPEs[[i]] <- modelPEs[[i]][modelPEs[[i]]$label == "e1", ]
+  results_sem_MI[i, ] <- data.frame(modelPEs[i])
+}
+
+names(results_sem_MI) <- names(out_sem)
+rownames(results_sem_MI) <- results_sem_MI$rhs
+
+results_sem_MI <- results_sem_MI[ , -c(1:4)]
+
+# same order as for the complete data results
+results_sem_MI <- results_sem_MI[match(pspc_scores, rownames(results_sem_MI)),]
+
+
+```
+
+
+
+# Trio models
+
+## Parameter estimates
+```{r}
+#list of all file names in the PRS folder
+wdir = "N:/durable/people/Leo/conduct/v1/data/PGS_LDpred2/" 
+vars <- list.files(wdir)
+# reorder 
+vars <- vars[c(1,3,11,7,5,13,6,8,10,2,4,12,9)]
+
+MIdir_trio = "N:/durable/people/Leo/conduct/v1/output/summarySEM_trio/" 
+modPE_trio <- list.files(MIdir_trio)
+modPE_trio <- modPE_trio[c(1,3,11,7,5,13,6,8,10,2,4,12,9)]
+
+setwd(MIdir_trio)
+
+modelPEs_trio <- rep(list(matrix(NA, nrow = 88, ncol = 15)), times = length(modPE_trio))
+
+for (i in 1:length(modPE_trio)) {
+  load(modPE_trio[i])
+  modelPEs_trio[[i]] <- out_sem_trio
+}
+
+names(modelPEs_trio) <- modPE_trio
+
+results_sem_MI_trio <- data.frame(matrix(NA, nrow = length(modelPEs_trio)*7, ncol = 15))
+
+for (i in 1:length(modPE_trio)) {
+  modelPEs_trio[[i]] <- modelPEs_trio[[i]][c(modelPEs_trio[[i]]$label == "c1" | 
+                                               modelPEs_trio[[i]]$label == "fnt" |
+                                               modelPEs_trio[[i]]$label == "mnt" |
+                                               modelPEs_trio[[i]]$label == "gt_f" | 
+                                               modelPEs_trio[[i]]$label == "gt_m" | 
+                                               modelPEs_trio[[i]]$label == "total_f" |
+                                               modelPEs_trio[[i]]$label == "total_m"), ]
+  results_sem_MI_trio[(7*i-6):(7*i), ] <- data.frame(modelPEs_trio[i])
+}
+
+
+names(results_sem_MI_trio) <- names(out_sem_trio)
+
+
+vars_rep <- rep(vars, each = 7)
+
+# rownames loop
+k = 0
+for (i in 1:13) {
+  for (j in 1:7) {
+    k = 7 - j
+    rownames(results_sem_MI_trio)[7*i - k] <- paste0(vars_rep[7*i - k], j)
+  }
+}
+
+results_sem_MI_trio <- results_sem_MI_trio[ , -c(1:4)]
+
+# same order as for the complete data results
+
+child_effects <- results_sem_MI_trio[results_sem_MI_trio$label == "c1", ]
+genetic_nurture <- results_sem_MI_trio[results_sem_MI_trio$label == "fnt" | results_sem_MI_trio$label == "mnt", ]
+genetic_transmis <- results_sem_MI_trio[results_sem_MI_trio$label == "gt_f" | results_sem_MI_trio$label == "gt_m", ] # just one parent is enough as the effects are the same in the model (genetic relatedness close to 0.5 for both of them)
+
+child_effects$qvalue <- p.adjust(child_effects$pvalue, method = "fdr", n = 13)
+genetic_nurture$qvalue <- p.adjust(genetic_nurture$pvalue, method = "fdr", n = 26)
+
+# genetic transmission: only account for 13 tests as maternal and paternal effects are basically the same
+genetic_transmis_f <- genetic_transmis[genetic_transmis$label == "gt_f",]
+genetic_transmis_m <- genetic_transmis[genetic_transmis$label == "gt_m",]
+genetic_transmis_f$qvalue <- p.adjust(genetic_transmis_f$pvalue, method = "fdr", n = 13)
+genetic_transmis_m$qvalue <- p.adjust(genetic_transmis_m$pvalue, method = "fdr", n = 13)
+
+genetic_transmis <- rbind(genetic_transmis_f, genetic_transmis_m)
+
+rm(genetic_transmis_f, genetic_transmis_m)
+
+
+
+# compare estimates across models
+univ_parents <- results_sem_MI[!endsWith(rownames(results_sem_MI), suffix = "Child"),]
+univ_child <- results_sem_MI[endsWith(rownames(results_sem_MI), suffix = "Child"),]
+
+trio_parents <- results_sem_MI_trio[startsWith(results_sem_MI_trio$label, prefix = "total"), ]
+trio_gn <- results_sem_MI_trio[endsWith(results_sem_MI_trio$label, suffix = "nt"), ]
+
+# parental effects
+cor(univ_parents$std.lv, trio_parents$std.lv) # corr = 0.999 proof of concept of estimation transmission vs genetic nurture
+
+# genetic nurture vs unadjusted effects
+cor(univ_parents$std.lv, trio_gn$std.lv) # no correlation at all
+
+
+# child effects
+cor(univ_child$std.lv, child_effects$std.lv) # corr = 0.987
+
+# plots
+library(ggplot2)
+
+plot_par <- data.frame(univ_parents$std.lv, trio_parents$std.lv)
+names(plot_par) <- c("est_uni", "est_trio")
+
+plot_gn <- data.frame(univ_parents$std.lv, trio_gn$std.lv)
+names(plot_gn) <- c("est_uni", "est_trio")
+
+plot_child <- data.frame(univ_child$std.lv, child_effects$std.lv)
+names(plot_child) <- c("est_uni", "est_trio")
+
+p1 <- ggplot(aes(est_uni, est_trio), data = plot_child) + geom_point() +
+  geom_smooth(method = "lm") + geom_abline(intercept = 0, slope = 1)
+
+p2 <- ggplot(aes(est_uni, est_trio), data = plot_child) + geom_point() +
+  geom_smooth(method = "lm") + geom_abline(intercept = 0, slope = 1)
+
+
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+
+png("Figure_SX_MI_par.png", height = 2000, width = 2000, res = 400, type = "cairo")
+p1
+dev.off()
+
+# plot only child effects
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+
+png("Figure_SX_MI_child.png", height = 2000, width = 2000, res = 400, type = "cairo")
+p2
+dev.off()
+
+p1b <- ggplot(aes(est_uni, est_trio), data = plot_gn) + geom_point() +
+   geom_abline(intercept = 0, slope = 1, linetype = 2)
+
+p2b <- ggplot(aes(est_uni, est_trio), data = plot_child) + geom_point() +
+  geom_abline(intercept = 0, slope = 1, linetype = 2)
+
+
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+
+png("Figure_SX_MI_noCor.png", height = 2000, width = 4000, res = 400, type = "cairo")
+cowplot::plot_grid(p1b, p2b, labels=c("A", "B"), ncol = 2, nrow = 1)
+dev.off()
+
+
+# confidence intervals are not calculated based on standardised estimates (but highly similar)
+results_sem_MI_trio$ci.lower <- results_sem_MI_trio$std.lv - 1.96*results_sem_MI_trio$se
+results_sem_MI_trio$ci.upper <- results_sem_MI_trio$std.lv + 1.96*results_sem_MI_trio$se
+
+child_effects$ci.lower <- child_effects$std.lv - 1.96*child_effects$se
+child_effects$ci.upper <- child_effects$std.lv + 1.96*child_effects$se
+
+genetic_nurture$ci.lower <- genetic_nurture$std.lv - 1.96*genetic_nurture$se
+genetic_nurture$ci.upper <- genetic_nurture$std.lv + 1.96*genetic_nurture$se
+
+genetic_transmis$ci.lower <- genetic_transmis$std.lv - 1.96*genetic_transmis$se
+genetic_transmis$ci.upper <- genetic_transmis$std.lv + 1.96*genetic_transmis$se
+
+# order and remove columns 
+names(results_sem_MI_trio)
+
+results_sem_MI_trio <- results_sem_MI_trio[, c(11, 8, 2:3, 5:7)]
+child_effects <- child_effects[, c(11, 8, 2:3, 5:7, 12)]
+genetic_nurture <- genetic_nurture[, c(11, 8, 2:3, 5:7, 12)]
+genetic_transmis <- genetic_transmis[, c(11, 8, 2:3, 5:7, 12)]
+
+```
+
+
+# Output tables
+```{r}
+# univariate models
+write.csv(results_sem_MI, file = "N:/durable/people/Leo/conduct/v1/output/SEMresults_uni_MI.csv", quote = F)
+
+
+# Trio models
+write.csv(results_sem_MI_trio, file = "N:/durable/people/Leo/conduct/v1/output/SEMresults_trio_MI.csv", quote = F)
+write.csv(child_effects, file = "N:/durable/people/Leo/conduct/v1/output/SEMresults_trio_childEffectsMI.csv", quote = F)
+write.csv(genetic_nurture, file = "N:/durable/people/Leo/conduct/v1/output/SEMresults_trio_geneticNurture_MI.csv", quote = F)
+write.csv(genetic_transmis, file = "N:/durable/people/Leo/conduct/v1/output/SEMresults_trio_geneticTransmis_MI.csv", quote = F)
+
+```
+
+
+# Plot
+```{r}
+# child_effects <- read.csv("N:/durable/people/Leo/conduct/v1/output/SEMresults_trio_childEffectsMI.csv")
+# genetic_nurture <- read.csv("N:/durable/people/Leo/conduct/v1/output/SEMresults_trio_geneticNurture_MI.csv")
+# genetic_transmis <- read.csv("N:/durable/people/Leo/conduct/v1/output/SEMresults_trio_geneticTransmis_MI.csv")
+
+#list of all file names in the PRS folder
+# wdir = "N:/durable/people/Leo/conduct/v1/data/PGS_LDpred2/" 
+# vars <- list.files(wdir)
+# # reorder 
+# vars <- vars[c(1,3,11,7,5,13,6,8,10,2,4,12,9)]
+
+#install.packages("wesanderson")
+library(ggplot2)
+library(wesanderson) # for colour palettes
+library(colorBlindness)
+
+
+# palettes available
+names(wes_palettes)
+colorBlindness::availablePalette()
+
+
+# check if colourblind friendly
+
+colorBlindness::displayAllColors(paletteMartin[c(2,3,11,13)])
+# colorBlindness::displayAllColors(wes_palette("Darjeeling2"))
+# colorBlindness::displayAllColors(wes_palette("Darjeeling1"))
+# 
+# 
+# pal <- wes_palette("Darjeeling2", type = "discrete")
+# pal <- pal[c(2:3)]
+
+# these two commands may only produce the correct colors when used in the console
+pal <- palette(paletteMartin)
+colorBlindness::displayAllColors(pal)
+
+pal <- pal[c(6,13)]
+
+
+# adding other columns to the results
+
+child_effects$Role <- "Child"
+child_effects$Type <- "Direct effect"
+child_effects$Trait <- vars
+
+child_effects$Class <- NA
+child_effects$Class[1:3] <- "Psychiatric"
+child_effects$Class[4:6] <- "Substance use"
+child_effects$Class[7:9] <- "Education-related"
+child_effects$Class[10:13] <- "Other"
+
+
+genetic_nurture$Role <- rep(c("Father", "Mother"), times = 13)
+genetic_nurture$Type <- "Genetic nurture"
+genetic_nurture$Trait <- rep(vars, each = 2)
+genetic_nurture$Class <- rep(child_effects$Class, each = 2)
+
+
+genetic_transmis$Role <- rep(c("Father", "Mother"), each = 13)
+genetic_transmis$Type <- "Genetic transmission"
+genetic_transmis$Trait <- rep(vars, times = 2)
+genetic_transmis$Class <- rep(child_effects$Class, times = 2)
+
+
+dfPlot_MI <- rbind(child_effects, genetic_nurture, genetic_transmis)
+
+
+# rename trait levels
+dfPlot_MI$Trait <- dplyr::recode(dfPlot_MI$Trait, EA = 'Educational attainment',
+                              CognPerf = 'Cognitive performance',
+                              AUDIT_P = 'Problematic alcohol use',
+                              Cannabis = 'Cannabis use',
+                              RiskTaking = 'Risk taking propensity',
+                              ASB = 'Antisocial behaviour',
+                              CUD = 'Cannabis use disorder',
+                              AgeFirstBirth = 'Age at first birth',
+                              MDD = "Major depressive disorder",
+                              RiskPC = "Risky behaviours",
+                              Income = "Household income",
+                              Anxiety = "Anxiety disorders",
+                              EXT.23me = "Externalising")
+
+
+names <- as.character(unique(dfPlot_MI$Trait))
+
+dfPlot_MI$star <- ""
+dfPlot_MI$star[dfPlot_MI$qvalue < 0.05] <- "*"
+
+# plot together
+
+dfPlot_MI$Class <- factor(dfPlot_MI$Class, levels = c("Psychiatric", "Substance use", "Education-related", "Other"))
+
+
+# combine with plot from complete data
+
+load(file = "N:/durable/people/Leo/conduct/v1/output/dfplot.RData")
+
+dfPlot$Data <- "complete"
+dfPlot_MI$Data <- "imputed"
+
+names(dfPlot_MI)[4] <- "z"
+
+dfPlot_child <- dfPlot[dfPlot$Role == "Child", ]
+dfPlot <- dfPlot[dfPlot$Role != "Child", ]
+
+dfPlot_child_MI <- dfPlot_MI[dfPlot_MI$Role == "Child", ]
+dfPlot_MI <- dfPlot_MI[dfPlot_MI$Role != "Child", ]
+
+dfAll <- rbind(dfPlot, dfPlot_MI)
+dfAll$Type <- as.factor(as.character(dfAll$Type))
+dfAll$Data <- as.factor(as.character(dfAll$Data))
+
+# plot
+ 
+dfAll <- dfAll[dfAll$Role == "Father" | dfAll$Type == "Genetic nurture", ]
+
+dfAll$Role[dfAll$Type == "Genetic transmission"] <- ""
+
+plot4 <- ggplot(dfAll, aes(group = Data)) +
+  geom_vline(xintercept = 0, linetype = 2) + facet_grid(Class~Role+Type, scales = "free_y") +
+  geom_errorbarh(data = dfAll,
+                 mapping = aes(y = Trait, x = std.lv, xmin = ci.lower, xmax = ci.upper, 
+                               color = Type),
+                 height = 0.6,
+                 size = 0.8, 
+                 position = position_dodge(0.7)) + 
+    geom_point(data = dfAll, 
+             mapping = aes(y = Trait, x = std.lv, fill = Type, color = Type, shape = Data), 
+             size = 3,
+             position = position_dodge(0.7)) +
+      geom_text(aes(x = std.lv, y = Trait, label = star), size = 6, position = position_dodge(0.7)) +
+  labs(x = "Beta")
+
+
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+
+png("Figure_main_Mi_vs_complete_new.png", height = 5800, width = 9100, res = 850, type = "cairo")
+plot4 + 
+  scale_y_discrete(limits = rev) + 
+  scale_colour_manual(values = pal) + 
+  scale_x_continuous(limits = c(-.075, .10), oob = scales::squish) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size = 10), 
+        strip.text.y = element_text(size = 12), 
+        legend.text = element_text(size = 11),
+        legend.title = element_text(size = 12))
+
+dev.off()
+
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+
+
+pdf("Figure_main_complete_vs_MI.pdf", height = 5800, width = 9100)
+plot4 + 
+  scale_y_discrete(limits = rev) + 
+  scale_colour_manual(values = pal) + 
+  scale_x_continuous(limits = c(-.075, .10), oob = scales::squish) +
+  theme(text = element_text(size = 14),
+        axis.text.x = element_text(size = 10), 
+        strip.text.y = element_text(size = 12), 
+        legend.text = element_text(size = 11),
+        legend.title = element_text(size = 12))
+
+dev.off()
+
+
+# compare complete vs imputed data for child direct effects
+
+pal <- palette(paletteMartin)
+colorBlindness::displayAllColors(pal)
+
+dfAll_child <- rbind(dfPlot_child, dfPlot_child_MI)
+dfAll_child$Data <- as.factor(as.character(dfAll_child$Data))
+
+# plot
+plot5 <- ggplot(dfAll_child, aes(group = Data)) +
+  geom_vline(xintercept = 0, linetype = 2) + facet_grid(rows = vars(Class), scales = "free_y") +
+  geom_errorbarh(data = dfAll_child,
+                 mapping = aes(y = Trait, x = std.lv, xmin = ci.lower, xmax = ci.upper, 
+                               color = Type),
+                 height = 0.5,
+                 size = 0.8, 
+                 position = position_dodge(0.7)) + 
+    geom_point(data = dfAll_child, 
+             mapping = aes(y = Trait, x = std.lv, shape = Data, color = Type), 
+             size = 3,
+             position = position_dodge(0.7)) +
+      geom_text(aes(x = std.lv, y = Trait, label = star), size = 6, position = position_dodge(0.7)) +
+  labs(x = "Beta")
+
+
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+
+png("Figure_Mi_vs_complete_child.png", height = 6000, width = 5800, res = 850, type = "cairo")
+plot5 + 
+  scale_y_discrete(limits = rev) + 
+  scale_colour_manual(values = pal[2]) + 
+  #scale_x_continuous(limits = c(-.125, .175), oob = scales::squish) +
+  scale_x_continuous(breaks = seq(-0.10, 0.15, 0.05), limits = c(-.125, .175), oob = scales::squish) +
+  theme(text = element_text(size = 15),
+        axis.text.x = element_text(size = 12), 
+        strip.text.y = element_text(size = 13), 
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 13))
+
+dev.off()
+
+
+# year 14 direct genetic effects
+
+load("N:/durable/people/Leo/conduct/v1/output/dfPlot_14y.RData")
+
+dfPlot_child_14y <- dfPlot_14y[dfPlot_14y$Role == "Child", ]
+
+plot5b <- ggplot(dfPlot_child_14y) +
+  geom_vline(xintercept = 0, linetype = 2) + facet_grid(rows = vars(Class), scales = "free_y") +
+  geom_errorbarh(data = dfPlot_child_14y,
+                 mapping = aes(y = Trait, x = std.lv, xmin = ci.lower, xmax = ci.upper, 
+                               color = Type),
+                 height = 0.4,
+                 size = 0.8, 
+                 position = position_dodge(0.7)) + 
+    geom_point(data = dfPlot_child_14y, 
+             mapping = aes(y = Trait, x = std.lv,color = Type), 
+             size = 3,
+             position = position_dodge(0.7)) +
+      geom_text(aes(x = std.lv, y = Trait, label = star), size = 6, position = position_dodge(0.7)) +
+  labs(x = "Beta")
+
+
+plot5b <- plot5b +  
+  scale_y_discrete(limits = rev) + 
+  scale_colour_manual(values = pal[2]) + 
+  #scale_x_continuous(limits = c(-.125, .175), oob = scales::squish) +
+  scale_x_continuous(breaks = seq(-0.10, 0.20, 0.05), limits = c(-.125, .225), oob = scales::squish) +
+  theme(text = element_text(size = 15),
+        axis.text.x = element_text(size = 12), 
+        strip.text.y = element_text(size = 13), 
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 13),
+        legend.position = "bottom")
+
+
+plot5a <- plot5 + 
+  scale_y_discrete(limits = rev) + 
+  scale_colour_manual(values = pal[2]) + 
+  #scale_x_continuous(limits = c(-.125, .175), oob = scales::squish) +
+  scale_x_continuous(breaks = seq(-0.10, 0.15, 0.05), limits = c(-.125, .175), oob = scales::squish) +
+  theme(text = element_text(size = 15),
+        axis.text.x = element_text(size = 12), 
+        strip.text.y = element_text(size = 13), 
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 13),
+        legend.position = "bottom")
+
+
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+
+png("Figure_directEffects8and14.png", height = 6300, width = 12000, res = 900, type = "cairo")
+cowplot::plot_grid(plot5a, plot5b, labels=c("A", "B"), ncol = 2, nrow = 1)
+dev.off()
+
+
+plot5b2 <- ggplot(dfPlot_child_14y) +
+  geom_vline(xintercept = 0, linetype = 2) + facet_grid(rows = vars(Class), scales = "free_y") +
+  geom_errorbarh(data = dfPlot_child_14y,
+                 mapping = aes(y = Trait, x = std.lv, xmin = ci.lower, xmax = ci.upper, 
+                               color = Type),
+                 height = 0.4,
+                 size = 0.8, 
+                 position = position_dodge(0.7), show.legend = F) + 
+    geom_point(data = dfPlot_child_14y, 
+             mapping = aes(y = Trait, x = std.lv, color = Type), 
+             size = 3,
+             position = position_dodge(0.7), show.legend = F) +
+      geom_text(aes(x = std.lv, y = Trait, label = star), size = 6, position = position_dodge(0.7)) +
+  labs(x = "Beta")
+
+
+setwd("N:/durable/people/Leo/conduct/v1/output/")
+
+png("Figure_complete_child_14y.png", height = 6000, width = 5800, res = 850, type = "cairo")
+plot5b2 +  
+  scale_y_discrete(limits = rev) + 
+  scale_colour_manual(values = pal[2]) + 
+  #scale_x_continuous(limits = c(-.125, .175), oob = scales::squish) +
+  scale_x_continuous(breaks = seq(-0.10, 0.20, 0.05), limits = c(-.125, .225), oob = scales::squish) +
+  theme(text = element_text(size = 15),
+        axis.text.x = element_text(size = 12), 
+        strip.text.y = element_text(size = 13)) 
+dev.off()
+
+
+
+###
+# correlation between imputed and complete data
+library(tidyr)
+df <- dfPlot[, c(2, 9:11, 14)]
+df_MI <- dfPlot_MI[, c(2, 9:11, 14)]
+
+df_wide <- df %>% pivot_wider(values_from = std.lv, names_from = c(Type))
+df_wide$total <- rowSums(df_wide[, 4:5])
+
+df_wide_MI <- df_MI %>% pivot_wider(values_from = std.lv, names_from = c(Type))
+df_wide_MI$total_MI <- rowSums(df_wide_MI[, 4:5])
+
+# correlation between parental effects (total)
+cor(df_wide$total, df_wide_MI$total_MI) # r = 0.984
+
+
+# child direct effects
+
+cor(df$std.lv, df_MI$std.lv) # r = 0.987
+
+```

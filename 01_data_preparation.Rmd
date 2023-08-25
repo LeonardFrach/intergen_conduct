@@ -1,0 +1,1086 @@
+---
+title: "Data preparation conduct problems project"
+author: "Leonard Frach"
+date: "06 June 2023"
+output: pdf_document
+---
+
+
+# Prepare phenotype data
+
+```{r}
+DATA <- "N:/durable/people/Leo/conduct/v1/data"
+OUT <- "N:/durable/people/Leo/conduct/v1/output"
+```
+
+
+```{r}
+
+# This script for pulling in your data (filepaths for MoBa phenotypic data and ID linkage file below,
+# as well as example code for merging genetic and phenotypic data)
+
+require(tidyverse)
+require(foreign)
+
+# For installing R packages available on CRAN, use: 
+#install.packages("PKGNAME", repos = "file://tsd-evs/shared/R/cran")
+
+# If your required package is not available on CRAN, you need to use the miniCRAN package outside of TSD
+# to create a repository containing the package, and then import to TSD and install from that repo
+
+#########################
+# Filepaths to MoBa data
+#########################
+
+# load packages
+library(psych)
+
+# name of items for RSDBD8 from NN111 to NN118 (Conduct disorder)
+
+# load pheno data file (not read from spss to avoid having strings of characters)
+data <- read.spss("N:/durable/data/MoBaPhenoData/PDB2306_MoBa_v12/SPSS/PDB2306_Q8yrs_v12.sav", to.data.frame = TRUE) %>%
+  select(PREG_ID_2306, BARN_NR, NN111, NN112, NN113, NN114, NN115, NN116, NN117, NN118)
+
+head(data)
+
+# check levels of 
+levels(data$NN111) 
+
+# recode CD items to numerical values
+
+for(i in 3:10){
+  data[, i] <- recode(data[, i], Never = 1, Seldom = 2, Sometimes = 3, Often = 4, .default = NA_real_)
+}
+
+
+# function from Wikus to create scale sum scores based on mean score and number of items answered
+mean_scale = function(x, minR=2){
+  ifelse(sum(!is.na(x)) >= minR, mean(x, na.rm = T), NA)
+}
+
+# apply function to create sum scores
+
+data$cdSum <- length(data[3:10]) * apply(data[, 3:10], 1, mean_scale, minR = 4)
+
+# number of individuals with missing sum score
+nSumNA <- length(which(is.na(data$cdSum))) # 101 individuals
+
+# z standardise the sum score
+data$cdSum_z <- scale(data$cdSum, scale = T)
+
+describe(data$cdSum_z)
+hist(data$cdSum_z) 
+
+
+# load pheno data 14y file (not read from spss to avoid having strings of characters)
+data14y <- read.spss("N:/durable/data/MoBaPhenoData/PDB2306_MoBa_v12/SPSS/PDB2306_Q14yB_v12.sav", to.data.frame = TRUE) %>%
+  select(PREG_ID_2306, BARN_NR, UB127, UB128, UB129, UB130, UB131, UB132, UB133, UB134)
+# 22k children
+
+head(data14y)
+
+# check levels of 
+levels(data14y$UB127) 
+levels(data14y$UB134) 
+
+# recode CD items to numerical values
+for(i in 3:10){
+  data14y[, i] <- recode(data14y[, i], "ALDRI" = 1, "1 GANG" = 2, "2-4 GANGER" = 3, "5-10 GANGER" = 4,
+                         "11-20 GANGER" = 5, "MER ENN 20 GANGER" = 6, .default = NA_real_)
+}
+
+# apply function to create sum scores
+
+data14y$cdSum14 <- length(data14y[3:10]) * apply(data14y[, 3:10], 1, mean_scale, minR = 4)
+
+# number of individuals with missing sum score
+nSumNA <- length(which(is.na(data14y$cdSum14))) # 108 individuals
+
+# z standardise the sum score
+data14y$cdSum14_z <- scale(data14y$cdSum14, scale = T)
+
+describe(data14y$cdSum14_z)
+hist(data14y$cdSum14_z) 
+
+
+data2 <- data %>%
+  left_join(data14y)
+
+cor(data2$cdSum, data2$cdSum14, use = "complete") # low correlation 0.14
+
+# Read in MoBa Birth Registry file
+## This file includes all births in MoBa (in version 12 there are 114,143 children from 112,644 pregnancies)
+## key variables: PREG_ID_2306 = main ID for linkage, unique to pregnancy, KJONN=child's sex, BARN_NR=birth order, 
+## FAAR=birth year, MORS_ALDER= mothers age
+
+mbrn <- foreign::read.spss("N:/durable/data/MoBaPhenoData/PDB2306_MoBa_V12/SPSS/PDB2306_MBRN_541_v12.sav", to.data.frame = TRUE)%>% 
+  select(PREG_ID_2306, BARN_NR, KJONN, FAAR, MORS_ALDER, PARITET_5)
+
+
+#########################
+# Example code for merging
+#########################
+
+phenoData <- data2 %>%
+  right_join(mbrn)
+
+#########################
+# Process, manipulate, prepare variables - and then write out to the data folder **for this project**
+#########################
+
+rm(data, data14y, data2, mbrn)
+
+
+save(phenoData, file = "N:/durable/people/Leo/conduct/v1/data/phenoData.RData")
+
+```
+
+
+# Prepare polygenic scores
+
+Loading PGS previously computed 
+```{r}
+# load phenotype data
+load("N:/durable/people/Leo/conduct/v1/data/phenoData.RData")
+
+library(tidyverse)
+library(psych)
+#library(haven)
+
+#list of all file names in the PRS folder
+wdir = "N:/durable/people/Leo/conduct/v1/data/PGS_LDpred2/" 
+vars <- list.files(wdir)
+
+# Read in ids, covs (PCs etc) and exclusion flag list to select unrelated trios
+
+# ##Read in exclusions list and retain only individuals not flagged for exclusion in a trio analysis
+#incl <- read.table("N:/data/durable/data/genetic/qcd_genetic_data/relatedness_exclusion_flag_list.txt", header = T) %>%
+#   filter(trio_analysis==0)
+
+# ##Read in geno-pheno ID linkage file and restrict to non-excluded individuals for trio analysis
+#ids <- read.table("N:/data/durable/data/Linkage files/core_IDS&covars_hrv_njl_v2.txt", header = T) %>%
+#   filter(IID %in% incl$IID)
+
+   
+# Read in linkage file and mutate ids (PREG_ID_2306 for child, birth order, and maternal/paternal ids to match with pheno data)
+
+# ids <- read.table("//tsd-evs/p471/data/durable/data/genetic/MoBaPsychGen_v1/MoBaPsychGen_v1-ec-eur-batch-basic-qc-cov.txt", 
+#                   header = T, 
+#                   sep = "\t") %>% 
+#   dplyr::mutate(PREG_ID_2306_BARN_NR = ifelse(Role == "Child", ID_2306, NA), 
+#                 F_ID_2306 = ifelse(Role == "Father", ID_2306, NA), 
+#                 M_ID_2306 = ifelse(Role == "Mother", ID_2306, NA)) %>% 
+#   tidyr::separate(PREG_ID_2306_BARN_NR,
+#                   into = c("PREG_ID_2306", "BARN_NR"),
+#                   sep = "_")
+
+ids <- read.table("N:/durable/data/genetic/MoBaPsychGen_v1/MoBaPsychGen_v1-ec-eur-batch-basic-qc-cov.txt", 
+                  header = T, 
+                  sep = "\t") %>% 
+  dplyr::mutate(PREG_ID_2306_BARN_NR = ifelse(Role == "Child", ID_2306, NA), 
+                F_ID_2306 = ifelse(Role == "Father", ID_2306, NA), 
+                M_ID_2306 = ifelse(Role == "Mother", ID_2306, NA)) %>% 
+  tidyr::separate(PREG_ID_2306_BARN_NR,
+                  into = c("PREG_ID_2306", "BARN_NR"),
+                  sep = "_")
+
+
+# Create df with all pgs, merged with linkage file
+
+processed_prs <- ids
+
+
+for(i in 1:length(vars)){
+  temp <- read.table(paste0(wdir, word(vars[i]),"/", word(vars[i]), "_pred_auto.txt"), header = T)
+  names(temp)[c(1,2,3,4,7)] <- c("FID", "IID", "F_ID", "M_ID", paste0("PGS_", word(vars[i])))
+  temp[, 7] <- scale(temp[, 7]) # standardise PGS
+  temp <- temp %>% select(-c(affection))
+  processed_prs = temp %>% left_join(processed_prs)
+}
+
+
+
+
+# only select PGS 
+
+processed_prs <- processed_prs %>% dplyr::select(IID, 
+                                                 FID,
+                                                 tidyr::matches("PREG_ID"),
+                                                 BARN_NR, 
+                                                 tidyr::matches("F_ID"),
+                                                 tidyr::matches("M_ID"),
+                                                 Role,
+                                                 tidyr::matches("PGS_"),
+                                                 tidyr::matches("PC"),
+                                                 genotyping_batch, 
+                                                 Plate_id, 
+                                                 imputation_batch,
+                                                 sex,
+                                                 YOB)
+
+
+# save file and copy it to the cluster to proceed there with the following step (regressing out covariates)
+
+save(processed_prs, file = "N:/durable/people/Leo/conduct/v1/data/PGS_preProcessed.RData")
+
+```
+
+
+# Processing genetic data (regressing out batch effects and PCs)
+Will be performed on the cluster due to computational time
+
+```{r}
+## Prepare genetic trio data
+
+# cor(processed_prs$PGS_CUD, processed_prs$PGS_CUDlowN) # corr = 0.9986068
+# cor(processed_prs$PGS_CUD, processed_prs$PGS_CUDlowNCAS) # corr = 0.9995766
+# cor(processed_prs$PGS_CUDlowN, processed_prs$PGS_CUDlowNCAS) # corr = 0.9983328
+
+
+# cor(processed_prs$PGS_CUD, processed_prs$PGS_CUD2) # corr = 0.9993885
+# cor(processed_prs$PGS_Anxiety, processed_prs$PGS_Anxiety2) # corr = 0.9998961
+
+
+
+
+# START HERE - NOTE MERGING BY FID DOES NOT WORK - CREATES DUPLICATES (more children per fam)
+# subset pgs data based on role, then merge again to get long dataframe
+
+#load("N:/durable/people/Leo/conduct/data/PGS_preProcessed.RData")
+
+
+
+# only select relevant PRSs
+
+
+'processed_prs_pc <- processed_prs %>% dplyr::select(IID, 
+                                                 FID,
+                                                 tidyr::matches("PREG_ID"),
+                                                 BARN_NR, 
+                                                 tidyr::matches("F_ID"),
+                                                 tidyr::matches("M_ID"),
+                                                 Role,
+                                                 tidyr::matches("_p<1"),
+                                                 tidyr::matches("PC"),
+                                                 tidyr::matches(".prs.pc"),
+                                                 -contains("p<1e"),
+                                                 genotyping_batch, 
+                                                 Plate_id, 
+                                                 imputation_batch)'
+
+
+
+# regress out genotype and impuation batch effects from PC and P=1 thresholds
+
+model <- function(y) {
+  m <- lm(y ~ processed_prs$PC1 + processed_prs$PC2 + 
+            processed_prs$PC3 + processed_prs$PC4 + processed_prs$PC5 + 
+            processed_prs$PC6 + processed_prs$PC7 + processed_prs$PC8 + 
+            processed_prs$PC9 + processed_prs$PC10 + processed_prs$genotyping_batch + 
+            processed_prs$Plate_id + processed_prs$imputation_batch, 
+          na.action = na.exclude)
+  return(rstandard(m))
+}
+
+
+
+# done on the cluster using process_PGS.bash and process_PGS.R scripts
+
+  
+# try with small subset
+
+# processed_prs_orig <- processed_prs
+# processed_prs <- processed_prs_orig[1:10000, ]
+# 
+# timestamp()
+# 
+# # only feasible on cluster
+#  processed_prsRes <- processed_prs %>% dplyr::mutate_at(vars(tidyr::matches("PGS_")), 
+#                        list(res = ~model(.))) %>% dplyr::select(IID, FID, 
+#                      tidyr::matches("PREG_ID"), BARN_NR, tidyr::matches("F_ID"), 
+#                      tidyr::matches("M_ID"), Role, tidyr::matches("PGS_"), 
+#                      tidyr::matches("PC"), genotyping_batch, Plate_id, imputation_batch)
+#  
+# 
+# timestamp()
+
+
+
+# read in residualized pgs
+# load("N:/durable/people/Leo/conduct/v1/data/PGS_processed.RData")
+# 
+# head(processed_prsRes)
+
+
+#########
+```
+
+
+# Merging processed PGS and pheno data
+```{r}
+
+library(tidyverse)
+library(psych)
+#library(haven)
+
+#list of all file names in the PRS folder
+wdir = "N:/durable/people/Leo/conduct/v1/data/PGS_LDpred2/" 
+vars <- list.files(wdir)
+
+
+# load processed scores
+
+load("N:/durable/people/Leo/conduct/v1/data/PGS_processed.RData")
+
+
+# Check cor between standard and residualized pgs
+
+cor(processed_prsRes$PGS_ADHD, processed_prsRes$PGS_ADHD_res, use = "complete.obs") #0.986
+ 
+cor(processed_prsRes$PGS_ASB, processed_prsRes$PGS_ASB_res, use = "complete.obs") # 0.991
+
+
+table(is.na(processed_prsRes$PREG_ID_2306))
+# 76380 pregnancies where genetic data is available
+
+prs_offspring = processed_prsRes %>% 
+  filter(Role == "Child") %>%
+  select(IID, FID, PREG_ID_2306, BARN_NR, contains("_res")) %>% 
+  rename_with(~paste0(., "_Child"), contains(vars))
+
+prs_mother = processed_prsRes %>%   
+  filter(Role == "Mother") %>%
+  select(IID, FID, M_ID_2306, contains("_res")) %>% 
+  rename_with(~paste0(., "_Mother"), contains(vars))
+
+prs_father = processed_prsRes %>%
+  filter(Role == "Father") %>%
+  select(IID, FID, F_ID_2306, contains("_res")) %>%
+  rename_with(~paste0(., "_Father"), contains(vars))
+
+
+# check for duplicates
+table(duplicated(prs_mother$M_ID_2306)) # no duplicated mothers
+
+table(duplicated(prs_mother$FID)) # FALSE 58115 TRUE 19310 (19310 mother-pairs are related and belong to the same family)
+
+
+table(duplicated(prs_father$F_ID_2306)) # no duplicated fathers
+
+table(duplicated(prs_father$FID)) # FALSE 41419  TRUE 11768  (11768  father-pairs are related)
+
+table(duplicated(prs_offspring$PREG_ID_2306)) # 700 duplicated pregnancy IDs (twins?)
+
+table(duplicated(prs_offspring$FID)) # FALSE 50360  TRUE 26020  (26020 offspring-pairs are related)
+
+# no exclusion required at this stage but after merge
+
+# id file to match mother and father ids to preg id:
+link_preg <- foreign::read.spss("N:/durable/data/MoBaPhenoData/PDB2306_MoBa_v12/SPSS/PDB2306_SV_INFO_v12.sav", to.data.frame = TRUE)
+
+
+table(duplicated(link_preg$M_ID_2306)) # FALSE 94630   TRUE 17417    (17417  mothers had more than one pregnancy)
+table(duplicated(link_preg$F_ID_2306)) # FALSE 74627  TRUE 37420    (37420  father have more than one child)
+table(duplicated(link_preg$PREG_ID_2306)) # no duplicated pregancy IDs (good)
+
+link_mother <- link_preg %>% select(PREG_ID_2306, M_ID_2306)
+link_father <- link_preg %>% select(PREG_ID_2306, F_ID_2306)
+
+table(is.na(link_mother$PREG_ID_2306)) # no missing pregnancy IDs
+
+link_mother$M_ID_2306 <- as.character(str_remove(link_mother$M_ID_2306, "   "))
+link_father$F_ID_2306 <- as.character(str_remove(link_father$F_ID_2306, "   "))
+
+table(prs_mother$M_ID_2306 %in% link_mother$M_ID_2306) # all mother IDs are in the link file (good, keep all)
+table(prs_father$F_ID_2306 %in% link_father$F_ID_2306) # all father IDs are in the link file (good, keep all)
+
+# merge preg id with prs based on mother and father ids (not needed if complete overlap)
+prs_mother <- right_join(link_mother, prs_mother)
+prs_father <- right_join(link_father, prs_father)
+
+#check number of mothers with unique pregnancies, families, etc
+table(duplicated(prs_mother$PREG_ID_2306)) # no duplicated, 92777  unique
+table(is.na(prs_mother$PREG_ID_2306)) # no missing pregnancy IDs 
+
+
+table(duplicated(prs_mother$M_ID_2306)) # FALSE 77425  TRUE 15352   (15352  mothers with multiple births)
+
+table(duplicated(prs_mother$FID)) # from 58115 unique FIDs and 34662 duplicated (families with more than one mother, e.g. two mothers are sisters)
+
+
+#check number of fathers with unique pregnancies, families, etc
+table(duplicated(prs_father$PREG_ID_2306)) # no  duplicates (62922 unique pregnancies)
+table(is.na(prs_father$PREG_ID_2306)) # no NAs 
+
+table(duplicated(prs_father$F_ID_2306)) # 53187 unique fathers (9735 fathers have more than one child)
+table(duplicated(prs_father$FID)) # from unique 41419 families (21503 families have more than one father, e.g. two fathers are brothers)
+
+# check number of unique children by family
+table(duplicated(prs_offspring$PREG_ID_2306)) # 700 duplicates (75680 unique pregnancies)
+table(duplicated(prs_offspring$FID)) # from 50360 families, 26020 from the same family
+
+
+# Merge child prs with mother prs, then father prs, dropping IID (redundant if using M_ID_2306 and F_ID_2306)
+
+# processed_prs2 <- merge(prs_offspring[,-1], prs_mother[,-3], by = c("PREG_ID_2306", "FID"), all.x = T, all.y = T) 
+# processed_prs2 <- merge(processed_prs2, prs_father[,-3], by = c("PREG_ID_2306", "FID"), all.x = T, all.y = T) 
+
+processed_prs2 <- merge(prs_offspring, prs_mother, by = c("PREG_ID_2306"), suffixes = c("_Child", "_Mother"), all.x = T, all.y = T) 
+processed_prs2 <- merge(processed_prs2, prs_father, by = c("PREG_ID_2306"), suffixes = "Father", all.x = T, all.y = T) 
+processed_prs2 <- processed_prs2 %>% rename(FID_Father = FID, IID_Father = IID)
+
+view(select(processed_prs2, PREG_ID_2306, FID_Mother, M_ID_2306, FID_Father, F_ID_2306)) # same fam ID can have different mothers, fathers and children.
+
+
+
+#############################
+#############################
+# Currently contains siblings - remove duplicate mothers and fathers prioritising those with complete data
+
+
+# keep complete trios only before additional exclusions
+prs_comp_trios <- processed_prs2[complete.cases(processed_prs2[ , c("PGS_ADHD_res_Child", "PGS_ADHD_res_Mother", "PGS_ADHD_res_Father")]),]
+
+dim(prs_comp_trios)[1]
+# 42115  trios with pgs for all members
+
+
+view(select(prs_comp_trios, PREG_ID_2306, FID_Mother, M_ID_2306, FID_Father, F_ID_2306)) # same fam ID can have different mothers, fathers and children.
+
+
+length(unique(prs_comp_trios$PREG_ID_2306)) # 41753 unique pregnancies
+length(unique(prs_comp_trios$M_ID_2306))    # 36636 unique mothers
+length(unique(prs_comp_trios$F_ID_2306))    # 36630 unique fathers
+
+
+## load your file of phenotype data, e.g. conduct problems ages 8 and 14
+load("N:/durable/people/Leo/conduct/v1/data/phenoData.RData")
+
+
+# list of child preg ids with any CD pheno data available at age 8
+pheno_ids <- phenoData %>% 
+  select(PREG_ID_2306, NN111, NN112, NN113, NN114, NN115, NN116, NN117, NN118, cdSum, cdSum_z) %>% 
+  subset(!is.na(phenoData[3]) | !is.na(phenoData[4]) | !is.na(phenoData[5]) | !is.na(phenoData[6]) |
+           !is.na(phenoData[7]) | !is.na(phenoData[8]) | !is.na(phenoData[9]) | !is.na(phenoData[10])) # 43,377 children
+
+# ids with full data at age 8y
+pheno_ids <- phenoData %>% 
+  select(PREG_ID_2306, NN111, NN112, NN113, NN114, NN115, NN116, NN117, NN118, cdSum, cdSum_z) %>% 
+  subset(!is.na(phenoData[3]) & !is.na(phenoData[4]) & !is.na(phenoData[5]) & !is.na(phenoData[6]) &
+           !is.na(phenoData[7]) & !is.na(phenoData[8]) & !is.na(phenoData[9]) & !is.na(phenoData[10])) # 42,733 children
+
+
+# ids with full data at age 14y
+pheno_ids2 <- phenoData %>% 
+  select(PREG_ID_2306, UB127, UB128, UB129, UB130, UB131, UB132, UB133, UB134) %>% 
+  subset(!is.na(phenoData[13]) & !is.na(phenoData[14]) & !is.na(phenoData[15]) & !is.na(phenoData[16]) &
+           !is.na(phenoData[17]) & !is.na(phenoData[18]) & !is.na(phenoData[19]) & !is.na(phenoData[20])) # 15841 children
+
+# recode ID to numeric to sort
+prs_comp_trios$PREG_ID_2306 <- as.numeric(prs_comp_trios$PREG_ID_2306)
+prs_comp_trios <- prs_comp_trios %>% arrange(PREG_ID_2306)
+
+
+# create dummy variable to indicate if child pheno data available (1) or not (NA)
+prs_comp_trios$trio_pheno[prs_comp_trios$PREG_ID_2306 %in% pheno_ids$PREG_ID_2306] <- 1
+prs_comp_trios$trio_pheno2[prs_comp_trios$PREG_ID_2306 %in% pheno_ids2$PREG_ID_2306] <- 1
+
+check <- prs_comp_trios %>% 
+  select(c(PREG_ID_2306, trio_pheno, trio_pheno2))
+
+# number of children with pheno at 14y but not at 8y
+length(prs_comp_trios[is.na(prs_comp_trios$trio_pheno) & prs_comp_trios$trio_pheno2 == 1, ]) # 51, so prioritise on 8y data
+
+table(prs_comp_trios$trio_pheno, useNA = "ifany") # 18592  with complete pheno 8y, 23533 without
+table(prs_comp_trios$trio_pheno2, useNA = "ifany") # 7184 with complete pheno 14y, 34941 without
+
+# sort on pregnancy id, with missing pheno for duplicates last, then retain first distinct id
+sort_trio_data <- prs_comp_trios %>% arrange(PREG_ID_2306, trio_pheno, trio_pheno2) %>% distinct(PREG_ID_2306, .keep_all = T)
+
+# sort on mother id, with missing pheno for duplicates last, then retain first distinct mother id
+sort_trio_data <- sort_trio_data %>% arrange(M_ID_2306, trio_pheno, trio_pheno2) %>% distinct(M_ID_2306, .keep_all = T)
+
+# sort on father id, with missing pheno for duplicates last, then retain first distinct father ID
+sort_trio_data <- sort_trio_data %>% arrange(F_ID_2306, trio_pheno, trio_pheno2) %>% distinct(F_ID_2306, .keep_all = T)
+
+length(unique(sort_trio_data$PREG_ID_2306)) # 36600 complete family trios (without siblings, one child per trio)
+length(unique(sort_trio_data$M_ID_2306))    # 36600
+length(unique(sort_trio_data$F_ID_2306))    # 36600
+length(unique(sort_trio_data$IID_Child))    # 36600
+
+length(unique(sort_trio_data$FID_Child))     # 30009 COMPLETELY unrelated family trios (not relevant here)
+length(unique(sort_trio_data$FID_Mother))    # 30009
+length(unique(sort_trio_data$FID_Father))    # 30009
+
+
+# filter by FID (not recommended), but keep it as a comparison with other approaches
+
+sort_trio_data2 <- sort_trio_data %>% arrange(FID_Child, trio_pheno, trio_pheno2) %>% distinct(FID_Child, .keep_all = T)
+sort_trio_data2 <- sort_trio_data2 %>% arrange(FID_Mother, trio_pheno, trio_pheno2) %>% distinct(FID_Mother, .keep_all = T)
+sort_trio_data2 <- sort_trio_data2 %>% arrange(FID_Father, trio_pheno, trio_pheno2) %>% distinct(FID_Father, .keep_all = T)
+
+table(sort_trio_data2$trio_pheno, useNA = "ifany") # 14906 with complete pheno 8y, 15103 without
+table(sort_trio_data2$trio_pheno2, useNA = "ifany") # 6362 with complete pheno 8y, 23647  without
+
+#########
+
+```
+
+# Remove related individuals across trios
+
+```{r}
+#########
+library(data.table)
+
+
+MZtwins <- fread("N:/durable/data/genetic/MoBaPsychGen_v1/MoBaPsychGen_v1_MZ_twin_pairs_identified_by_KING.txt")
+KING_across <- fread("N:/durable/data/genetic/MoBaPsychGen_v1/MoBaPsychGen_v1_Within_generation_PO_across_generation_S_identified_by_KING.txt")
+
+
+# keep only one individual of pairs of twins, prioritizing those with pheno data (twins in child generation have been removed already)
+
+# sort twin pairs in the data based on phenotype and keep the first of each twin pair (thus prioritizing those with pheno)
+keep_mz <- sort_trio_data %>% 
+  filter(sort_trio_data$FID_Child %in% MZtwins$FID_in_fam_file) %>%
+  arrange(FID_Child, trio_pheno, trio_pheno2) %>% distinct(FID_Child, .keep_all = T) %>%
+  select(PREG_ID_2306)
+
+# index of twins to be remove
+remove_mz <- sort_trio_data %>% 
+  filter(sort_trio_data$FID_Child %in% MZtwins$FID_in_fam_file) %>%
+  filter(!(.$PREG_ID_2306 %in% keep_mz$PREG_ID_2306)) %>% 
+  select(PREG_ID_2306)
+
+# double check (should all be false)
+keep_mz$PREG_ID_2306 %in% remove_mz$PREG_ID_2306
+
+# remove twins from our data frame
+sort_trio_data <- sort_trio_data[!(sort_trio_data$PREG_ID_2306 %in% remove_mz$PREG_ID_2306), ]
+# 170 individuals were removed
+
+
+# remove other related individuals (here only parent-offspring relations across generations, i.e., individuals are child and parent in the data set)
+
+head(KING_across)
+
+# same approach as with twins
+keep_KING <- sort_trio_data %>% 
+  filter(FID_Child %in% KING_across$FID_in_fam_file) %>%
+  arrange(FID_Child, trio_pheno, trio_pheno2) %>% distinct(FID_Child, .keep_all = T) %>%
+  select(PREG_ID_2306)
+
+remove_KING <- sort_trio_data %>% 
+  filter(FID_Child %in% KING_across$FID_in_fam_file) %>%
+  filter(!(.$PREG_ID_2306 %in% keep_KING$PREG_ID_2306)) %>% 
+  select(PREG_ID_2306)
+
+# should all be FALSE
+keep_KING$PREG_ID_2306 %in% remove_KING$PREG_ID_2306
+
+sort_trio_data <- sort_trio_data[!(sort_trio_data$PREG_ID_2306 %in% remove_KING$PREG_ID_2306), ]
+# 175 individuals removed
+
+length(unique(sort_trio_data$PREG_ID_2306)) # 36256
+length(unique(sort_trio_data$M_ID_2306))    # 36256
+length(unique(sort_trio_data$F_ID_2306))    # 36256
+length(unique(sort_trio_data$IID_Child))    # 36256
+
+table(sort_trio_data$trio_pheno, useNA = "ifany") # 16550 yes, 19706  no
+
+
+rm(KING_across, MZtwins, keep_KING, keep_mz, remove_KING, remove_mz)
+
+
+
+## check whether closely related individuals across and within generations are still present in the data using the KING/plink files
+
+pihat_total <- fread("N:/durable/data/genetic/MoBaPsychGen_v1/MoBaPsychGen_v1-ec-eur-batch-basic-qc-ibd.genome")
+head(pihat_total)
+nrow(pihat_total) # 181032 pairs between and within families with (pihat coefficient > 0.15)
+
+
+# transform data frame to long format to get one column of IIDs
+sort_trio_data_long <- sort_trio_data %>% pivot_longer(c("IID_Child", "IID_Mother", "IID_Father"), names_to = "Role")
+nrow(sort_trio_data_long) # 108768 individuals 
+
+# data frame with relevant variables for quick views
+data_view <- sort_trio_data %>% select(c(1:3, trio_pheno, 18:20, 34:36))
+
+# we only need the pihat information for pairs where both individuals are still in our data set
+pihat_total <- pihat_total %>% filter(IID1 %in% sort_trio_data_long$value & IID2 %in% sort_trio_data_long$value)  
+nrow(pihat_total) # 87592 pairs
+
+# includes parent-offspring relations, which we do not want to exclude! (We already excluded PO-pairs across generations)
+pihat_total <- pihat_total %>% filter(RT != "PO")
+nrow(pihat_total) # still 15117 related pairs
+
+table(pihat_total$RT) # many full siblings in the data set, OT = uncle/aunt?, UN = unknown relatedness?
+
+# we also excluded siblings on the child level, but not on the parent level, so we keep FS in the pihat file
+
+# only relatedness higher than given threshold
+pihat <- 0.0884 * 2 # threshold for PIHAT (twice the KING coefficient)
+pihat_total <- pihat_total %>% filter(PI_HAT > pihat)
+nrow(pihat_total) # 13060 related pairs
+
+
+################
+################
+################
+
+
+## Option 1: just filter by column 1
+sort_test_long <- sort_trio_data_long %>% 
+  filter(!(value %in% pihat_total$IID1))
+nrow(sort_test_long) # 99979
+
+# recode to wide format
+filterIID1 <- sort_test_long %>% pivot_wider(names_from = "Role", values_from = "value")
+filterIID1 <- filterIID1[complete.cases(filterIID1[ , c("IID_Child", "IID_Mother", "IID_Father")]),]
+(trio1 <- nrow(filterIID1)) # 31032 trios (unrelated)
+(pheno1 <- sum(!is.na(filterIID1$trio_pheno))) # 14100 trios with complete child pheno data 8y
+
+# any pairs left in data frame?
+nrow(pihat_total %>% filter(IID1 %in% sort_test_long$value & IID2 %in% sort_test_long$value))
+# zero pairs left! (as it should be)
+
+length(unique(filterIID1$IID_Child)) #31032
+
+
+## Option 2: just filter by column 2
+
+sort_test_long2 <- sort_trio_data_long %>% 
+  filter(!(value %in% pihat_total$IID2))
+nrow(sort_test_long2) # 99827
+
+# recode to wide format
+filterIID2 <- sort_test_long2 %>% pivot_wider(names_from = "Role", values_from = "value")
+filterIID2 <- filterIID2[complete.cases(filterIID2[ , c("IID_Child", "IID_Mother", "IID_Father")]),]
+(trio2 <- nrow(filterIID2)) # 31086 complete trios (unrelated)
+(pheno2 <- sum(!is.na(filterIID2$trio_pheno))) # 14168 trios with child pheno data
+
+# any pairs left in data frame?
+nrow(pihat_total %>% filter(IID1 %in% sort_test_long2$value & IID2 %in% sort_test_long2$value))
+# zero pairs left!
+
+length(unique(filterIID2$IID_Child)) # 31086
+
+
+#######
+
+
+# add info about pheno availability to pihat file for options 3 and 4
+
+# IID1 = individual ID of person in column 1 of pihat file, trio_pheno = pheno available for this person in column IID1
+# IID2 = individual ID of person in column 2 of pihat file, trio_pheno2 = pheno available for this person in column IDD2
+
+merge <- sort_trio_data_long %>% select(value, trio_pheno) %>% rename(IID1 = value) # IID to IID1
+pihat_total <- left_join(pihat_total, merge)
+
+merge <- sort_trio_data_long %>% select(value, trio_pheno) %>% rename(IID2 = value, trio_phenoB = trio_pheno) # IID to IID2
+pihat_total <- left_join(pihat_total, merge)
+
+pihat_check <- pihat_total %>%
+  select(c(IID1, IID2, trio_pheno, trio_phenoB, FID1, FID2))
+
+
+sum(is.na(pihat_check$trio_pheno) & !is.na(pihat_check$trio_phenoB)) # 3014 in IID1 column who have pheno data and no pheno for IID2
+sum(!is.na(pihat_check$trio_pheno) & is.na(pihat_check$trio_phenoB)) # 3171 in IID1 column who have pheno data and no pheno for IID2
+
+
+## Option 3: prioritize by pheno, removing IID2 by default (only remove IID1 if IID2 has pheno data)
+
+# if trio_pheno of IID2 of that pair is available, remove individual in column IID1 (no matter if pheno available or NA), if pheno for IID2 is NA, remove individual in column 2
+
+# variable remove means 1 = remove ID in column 1; 2 = remove ID in column2
+pihat_check$remove <- ifelse(!is.na(pihat_check$trio_phenoB), 1, 2)
+
+
+# filter data set: remove individuals in column 1 that should be removed (remove == 1), and remove individuals in column to to be removed (remove == 2)
+sort_test_long3 <- sort_trio_data_long %>% 
+  filter(!(value %in% pihat_check$IID1[pihat_check$remove == 1])) %>%
+  filter(!(value %in% pihat_check$IID2[pihat_check$remove == 2]))
+nrow(sort_test_long3) # 100045
+
+# recode to wide format
+filter_prioPheno <- sort_test_long3 %>% pivot_wider(names_from = "Role", values_from = "value")
+filter_prioPheno <- filter_prioPheno[complete.cases(filter_prioPheno[ , c("IID_Child", "IID_Mother", "IID_Father")]),]
+(trio3 <- nrow(filter_prioPheno)) # 31286 complete trios (unrelated)
+(pheno3 <- sum(!is.na(filter_prioPheno$trio_pheno)))  # 15304 trios with child pheno data
+
+# any pairs left in data frame?
+nrow(pihat_total %>% filter(IID1 %in% sort_test_long3$value & IID2 %in% sort_test_long3$value))
+# zero pairs left!
+
+length(unique(filter_prioPheno$IID_Child)) # 31286
+
+
+## Option 4: prioritize by pheno, removing IID1 by default (only remove IID2 if IID1 has pheno data)
+
+# if trio_pheno of IID1 of that pair is available, remove individual in column IID2 (no matter if pheno available or NA), if pheno for IID1 is NA, remove individual in column 1
+# variable remove means 1 = remove ID in column 1; 2 = remove ID in column2
+
+pihat_check$remove <- NULL
+pihat_check$remove <- ifelse(!is.na(pihat_check$trio_pheno), 2, 1)
+
+
+# filter data set: remove individuals in column 1 that should be removed (remove == 1), and remove individuals in column to to be removed (remove == 2)
+sort_test_long4 <- sort_trio_data_long %>% 
+  filter(!(value %in% pihat_check$IID1[pihat_check$remove == 1])) %>%
+  filter(!(value %in% pihat_check$IID2[pihat_check$remove == 2]))
+nrow(sort_test_long4) # 100029
+
+# recode to wide format
+filter_prioPheno2 <- sort_test_long4 %>% pivot_wider(names_from = "Role", values_from = "value")
+filter_prioPheno2 <- filter_prioPheno2[complete.cases(filter_prioPheno2[ , c("IID_Child", "IID_Mother", "IID_Father")]),]
+(trio4 <- nrow(filter_prioPheno2)) # 31290 complete trios (unrelated)
+(pheno4 <- sum(!is.na(filter_prioPheno2$trio_pheno))) # 15325 trios with child pheno data
+
+# any pairs left in data frame?
+nrow(pihat_total %>% filter(IID1 %in% sort_test_long4$value & IID2 %in% sort_test_long4$value))
+# zero pairs left!
+
+length(unique(filter_prioPheno2$IID_Child)) # 31290
+length(unique(filter_prioPheno2$PREG_ID_2306)) #31290
+
+
+## Options 5 and 6 are similar to 3 and 4, respectively, and result in the same sample size, so not needed
+
+# # Option 5:
+# 
+# # if trio_pheno of IID2 of that pair is available, remove individual in column IID1 (no matter if pheno available or NA), if pheno for IID1 and pheno for IID2 are NA, remove individual in column 1, otherwise remove individual in column 2
+# 
+# # variable remove means 1 = remove ID in column 1; 2 = remove ID in column2
+# 
+# pihat_check$remove <- NULL
+# pihat_check$remove <- ifelse(!is.na(pihat_check$trio_pheno2), 1,
+#                              ifelse(is.na(pihat_check$trio_pheno) & is.na(pihat_check$trio_pheno2), 1,  2))
+# 
+# 
+# # filter data set: remove individuals in column 1 that should be removed (remove == 1), and remove individuals in column to to be removed (remove == 2)
+# sort_test_long5 <- sort_trio_data_long %>% 
+#   filter(!(value %in% pihat_check$IID1[pihat_check$remove == 1])) %>%
+#   filter(!(value %in% pihat_check$IID2[pihat_check$remove == 2]))
+# nrow(sort_test_long5) # 100284
+# 
+# # recode to wide format
+# filter_prioPheno3 <- sort_test_long5 %>% pivot_wider(names_from = "Role", values_from = "value")
+# filter_prioPheno3 <- filter_prioPheno3[complete.cases(filter_prioPheno3[ , c("PGS_ADHD_res_Child", "PGS_ADHD_res_Mother", "PGS_ADHD_res_Father")]),]
+# (trio5 <- nrow(filter_prioPheno3)) # 36120 complete trios (unrelated)
+# (pheno5 <- sum(!is.na(filter_prioPheno3$trio_pheno))) # 16765  trios with child pheno data
+# 
+# # any pairs left in data frame?
+# nrow(pihat_total %>% filter(IID1 %in% sort_test_long5$value & IID2 %in% sort_test_long5$value))
+# # zero pairs left!
+# 
+# 
+# 
+# # Option 6:
+# # if trio_pheno of IID1 of that pair is available, remove individual in column IID2 (no matter if pheno available or NA), if pheno for IID1 and pheno for IID2 are NA, remove individual in column 2, otherwise remove individual in column 1
+# 
+# # variable remove means 1 = remove ID in column 1; 2 = remove ID in column2
+# 
+# pihat_check$remove <- NULL
+# pihat_check$remove <- ifelse(!is.na(pihat_check$trio_pheno), 2,
+#                              ifelse(is.na(pihat_check$trio_pheno) & is.na(pihat_check$trio_pheno2), 2,  1))
+# 
+# 
+# # filter data set: remove individuals in column 1 that should be removed (remove == 1), and remove individuals in column to to be removed (remove == 2)
+# sort_test_long6 <- sort_trio_data_long %>% 
+#   filter(!(value %in% pihat_check$IID1[pihat_check$remove == 1])) %>%
+#   filter(!(value %in% pihat_check$IID2[pihat_check$remove == 2]))
+# nrow(sort_test_long6) # 100192
+# 
+# # recode to wide format
+# filter_prioPheno4 <- sort_test_long6 %>% pivot_wider(names_from = "Role", values_from = "value")
+# filter_prioPheno4 <- filter_prioPheno4[complete.cases(filter_prioPheno4[ , c("PGS_ADHD_res_Child", "PGS_ADHD_res_Mother", "PGS_ADHD_res_Father")]),]
+# (trio6 <- nrow(filter_prioPheno4)) # 36107 complete trios (unrelated)
+# (pheno6 <- sum(!is.na(filter_prioPheno4$trio_pheno))) # 16746  trios with child pheno data
+# 
+# # any pairs left in data frame?
+# nrow(pihat_total %>% filter(IID1 %in% sort_test_long6$value & IID2 %in% sort_test_long6$value))
+# # zero pairs left!
+
+
+######
+
+# Overview of gain in sample size
+
+table_trios <- as.data.frame(matrix(c(nrow(sort_trio_data2), length(which(!is.na(sort_trio_data2$trio_pheno))), 
+                                      trio1, pheno1, 
+                                      trio2, pheno2, 
+                                      trio3, pheno3, 
+                                      trio4, pheno4), ncol = 5))
+
+colnames(table_trios) <- c("Unique_FID", "Pihat_Option1", "Pihat_Option2", "Pihat_Option3", "Pihat_Option4")
+rownames(table_trios) <- c("N_trios", "N_pheno")
+
+gain_trios <- table_trios[1, ] - table_trios[1, 1] 
+gain_pheno <- table_trios[2, ] - table_trios[2, 1] 
+
+table_trios <- rbind(table_trios, gain_trios, gain_pheno)
+rownames(table_trios)[3:4] <- c("gain_trios", "gain_pheno")
+
+print(table_trios)
+
+### SUMMARY ###
+# All filtering options based on relatedness coefficients (pihat) result in a substantial increase in sample size compared to just using unique FIDs.
+# Options 1 (removing column 1 of related pairs) and 3 (removing column 1 but prioritizing by phenotype available) outperform the other options
+# Option 3 in the example is the preferred option (largest N and largest N with pheno data).
+
+
+#########
+
+# save trio pgs filered for dubs/relatives based on pihat:
+write.table(filter_prioPheno2, file="N:/durable/people/Leo/conduct/v1/data/PGS_trios_filtered_byPIHAT.txt", quote=FALSE, col.names=T,row.names=F)
+
+
+# save trio pgs filered for dubs/relatives based on IDs:
+write.table(sort_trio_data2, file="N:/durable/people/Leo/conduct/v1/data/PGS_trios_filtered_byID.txt", quote=FALSE, col.names=T,row.names=F)
+
+
+################
+################
+################
+```
+
+
+
+##This is a much more detailed process which I thought might result in a higher N but it didn't
+
+```{r}
+
+# get IIDs which occur the most in the data set
+# table(pihat_total$IID1)[table(pihat_total$IID1) == max(table(pihat_total$IID1))]
+# # 9477888164_R01C02 with 7 pairs
+# 
+# table(pihat_total$IID2)[table(pihat_total$IID2) == max(table(pihat_total$IID2))]
+# # 204167230029_R01C02 with 8 pairs
+# 
+# # remove those from both the pihat file (and later all of them form the data frame)
+# pihat_total <- pihat_total %>% filter(IID1 != "9477888164_R01C02" & IID2 != "204167230029_R01C02")
+# nrow(pihat_total) # 13093 related pairs
+# 
+# # start list of IDs to exclude from data frame 
+# exclude <- c("9477888164_R01C02", "204167230029_R01C02")
+# 
+# # repeat the process
+# table(pihat_total$IID1)[table(pihat_total$IID1) == max(table(pihat_total$IID1))]
+# # 9456572133_R02C01 with 6 pairs 
+# 
+# table(pihat_total$IID2)[table(pihat_total$IID2) == max(table(pihat_total$IID2))]
+# # 201048710052_R10C02   9970498124_R05C01 with 6 pairs
+# 
+# pihat_total <- pihat_total %>% 
+#   filter(IID1 != "9456572133_R02C01" 
+#          & IID2 != "201048710052_R10C02" & IID2 != "9970498124_R05C01")
+# nrow(pihat_total) # 13076 related pairs
+# 
+# exclude <- c(exclude, "9456572133_R02C01","201048710052_R10C02", "9970498124_R05C01")
+# 
+# # repeat the process
+# table(pihat_total$IID1)[table(pihat_total$IID1) == max(table(pihat_total$IID1))]
+# # 201711900155_R01C01 202046870153_R01C02   9970503136_R11C02 with 5 pairs 
+# 
+# table(pihat_total$IID2)[table(pihat_total$IID2) == max(table(pihat_total$IID2))]
+# # 203979200146_R10C02 203980210079_R02C01 203981480105_R03C02 204171680033_R01C02  with 5 pairs
+# 
+# pihat_total <- pihat_total %>% 
+#   filter(IID1 != "201711900155_R01C01" & 
+#            IID1 != "202046870153_R01C02" & 
+#            IID1 != "9970503136_R11C02" &
+#            IID2 != "203979200146_R10C02" &
+#            IID2 != "203980210079_R02C01" &
+#            IID2 != "203981480105_R03C02" &
+#            IID2 != "204171680033_R01C02")
+# nrow(pihat_total) # 13042 related pairs
+# 
+# exclude <- c(exclude, "201711900155_R01C01", "202046870153_R01C02", "9970503136_R11C02",
+#              "203979200146_R10C02", "203980210079_R02C01", "203981480105_R03C02", "204171680033_R01C02")
+# 
+# 
+# # repeat the process
+# table(pihat_total$IID1)[table(pihat_total$IID1) == max(table(pihat_total$IID1))]
+# # many with 4 pairs
+# 
+# pair4 <- table(pihat_total$IID1)[table(pihat_total$IID1) == max(table(pihat_total$IID1))] %>%
+#   as.data.frame() %>% select(Var1)
+# 
+# table(pihat_total$IID2)[table(pihat_total$IID2) == max(table(pihat_total$IID2))]
+# # many with 4 pairs
+# pair4b <- table(pihat_total$IID2)[table(pihat_total$IID2) == max(table(pihat_total$IID2))] %>%
+#   as.data.frame() %>% select(Var1)
+# 
+# pihat_total <- pihat_total %>% 
+#   filter(!(IID1 %in% pair4$Var1) & !(IID2 %in% pair4b$Var1))
+# nrow(pihat_total) # 12276 related pairs
+# 
+# 
+# # repeat the process
+# pair3 <- table(pihat_total$IID1)[table(pihat_total$IID1) == max(table(pihat_total$IID1))] %>%
+#   as.data.frame() %>% select(Var1)
+# 
+# pair3b <- table(pihat_total$IID2)[table(pihat_total$IID2) == max(table(pihat_total$IID2))] %>%
+#   as.data.frame() %>% select(Var1)
+# 
+# pihat_total <- pihat_total %>% 
+#   filter(!(IID1 %in% pair3$Var1) & !(IID2 %in% pair3b$Var1))
+# nrow(pihat_total) # 11869 related pairs
+# 
+# 
+# # add list of individuals to exclude
+# exclude <- as.data.frame(exclude)
+# names(exclude) <- names(pair4)
+# 
+# exclude <- rbind(exclude, pair4, pair4b, pair3, pair3b)
+# 
+# rm(pair4, pair4b, pair3, pair3b)
+# 
+# # remove those from data frame
+# sort_trio_data_long <- sort_trio_data_long %>% filter(!(value %in% exclude$Var1))
+# nrow(sort_trio_data_long) # 108686 individuals 
+# 
+# 
+# # get IIDs that occur in both sides of the pair (ID1 and ID2)
+# IID_both <- sort_trio_data_long %>% 
+#   filter(value %in% pihat_total$IID1 & value %in% pihat_total$IID2) %>%
+#   select(c(value, PREG_ID_2306, FID_Child, FID_Mother, FID_Father, M_ID_2306, F_ID_2306, trio_pheno, Role))
+# nrow(IID_both) # 856 IIDs on both sides of pair-wise matches
+# 
+# # get IIDs that occur twice on one side
+# pair2 <- table(pihat_total$IID1)[table(pihat_total$IID1) == max(table(pihat_total$IID1))] %>%
+#   as.data.frame() %>% select(Var1)
+# nrow(pair2) # 3445
+# 
+# pair2b <- table(pihat_total$IID2)[table(pihat_total$IID2) == max(table(pihat_total$IID2))] %>%
+#   as.data.frame() %>% select(Var1)
+# nrow(pair2b) # 3279
+# 
+# 
+# # find IIDs that occur on both sides *and* twice on either side
+# dups <- IID_both[IID_both$value %in% pair2$Var1 | IID_both$value %in% pair2b$Var1, ]
+# nrow(dups) # 75
+# 
+# pihat_total <- pihat_total %>% 
+#   filter(!(IID1 %in% dups$value)) # only necessary to filter by one ID
+# nrow(pihat_total) # 11753 related pairs
+# 
+# # remove those from data frame
+# sort_trio_data_long <- sort_trio_data_long %>% filter(!(value %in% dups$value))
+# nrow(sort_trio_data_long) # 108611 individuals 
+# 
+# 
+# # repeat the last two steps to see how many pairs are left
+# # get IIDs that occur in both sides of the pair (ID1 and ID2)
+# IID_both <- sort_trio_data_long %>% 
+#   filter(value %in% pihat_total$IID1 & value %in% pihat_total$IID2) %>%
+#   select(c(value, PREG_ID_2306, FID_Child, FID_Mother, FID_Father, M_ID_2306, F_ID_2306, trio_pheno, Role))
+# nrow(IID_both) # 777 IIDs on both sides of pair-wise matches
+# 
+# # get IIDs that occur twice on one side
+# pair2 <- table(pihat_total$IID1)[table(pihat_total$IID1) == max(table(pihat_total$IID1))] %>%
+#   as.data.frame() %>% select(Var1)
+# nrow(pair2) # 3404
+# 
+# pair2b <- table(pihat_total$IID2)[table(pihat_total$IID2) == max(table(pihat_total$IID2))] %>%
+#   as.data.frame() %>% select(Var1)
+# nrow(pair2b) # 3233
+# 
+# exclude <- rbind(exclude, IID_both$value, pair2, pair2b)
+# 
+# # remove those individuals
+# sort_trio_data_long <- sort_trio_data_long %>% 
+#   filter(!(value %in% exclude$Var1))
+# nrow(sort_trio_data_long) # 101987
+# 
+# 
+# # remove from pihat file
+# pihat_total <- pihat_total %>% 
+#   filter(!(IID1 %in% IID_both$value)) %>%
+#   filter(!(IID1 %in% pair2$Var1)) %>%
+#   filter(!(IID2 %in% pair2b$Var1))
+# nrow(pihat_total) # 1353 pairs left
+# 
+# 
+# rm(pair2, pair2b, IID_both, exclude)
+# 
+# # pairs which are still left in data set
+# remove_pihat <- pihat_total %>% filter(IID1 %in% sort_trio_data_long$value & IID2 %in% sort_trio_data_long$value)
+# 
+# # test which column to remove results in more loss
+# sort_trio_data_long %>% 
+#   filter(!(value %in% remove_pihat$IID1)) %>%
+#   pull(trio_pheno) %>% table()
+# # 46381 non-missing values (roughly one third of this value is Number of trios, but less than that) 
+# 
+# sort_trio_data_long %>% 
+#   filter(!(value %in% remove_pihat$IID2)) %>%
+#   pull(trio_pheno) %>% table()
+# # 46375 non-missing values (roughly one third of this value is Number of trios, but less than that) 
+# # 
+# # no huge difference, try other prioritization
+# 
+# # data frame only containing families where child has pheno data
+# data_long_maxPheno <- sort_trio_data_long %>% 
+#   filter(!(value %in% remove_pihat$IID2) & !is.na(trio_pheno) |
+#            !(value %in% remove_pihat$IID1) & !is.na(trio_pheno))
+# # only 5 trios more with pheno data, so don't use this way
+# 
+# 
+# data_long_maxGeno <- sort_trio_data_long %>% 
+#   filter(!(value %in% remove_pihat$IID1))
+# 
+# # any pairs left in data frame?
+# pihat_total %>% filter(IID1 %in% data_long_maxGeno$value & IID2 %in% data_long_maxGeno$value) %>% count()
+# # zero pairs left!
+# pihat_last <- pihat_total
+# 
+# # transform to wide format
+# 
+# sort_trio_dataX <- data_long_maxGeno %>% pivot_wider(names_from = "Role", values_from = "value")
+# sort_trio_dataX <- sort_trio_dataX[complete.cases(sort_trio_dataX[ , c("ADHD.prs.pc_Child", "ADHD.prs.pc_Mother", "ADHD.prs.pc_Father")]),]
+# nrow(sort_trio_dataX) # 36136 complete trios
+# table(sort_trio_dataX$trio_pheno) # 16679 with pheno data
+# 
+# 
+# sameFID <- sort_trio_dataX[duplicated(sort_trio_dataX$FID_Child), ]
+# 
+# 
+# (gain_total <- nrow(sort_trio_dataX) - nrow(sort_trio_data2)) # 6058 trios
+# (gain_pheno <- length(which(!is.na(sort_trio_dataX$trio_pheno))) - length(which(!is.na(sort_trio_data2$trio_pheno)))) # 1582 trios
+
+
+
+```
+
+
+
+# Merge genetic and phenotype data
+
+```{r}
+# clear workspace
+rm(list = ls())
+
+# load packages
+library(psych)
+library(tidyverse)
+
+# read in trio pgs (complete trios only, excluding relatives/sibs)
+trio_pgs <- read.table("N:/durable/people/Leo/conduct/v1/data/PGS_trios_filtered_byPIHAT.txt", header = T)
+
+# #read phenotype data
+load("N:/durable/people/Leo/conduct/v1/data/phenoData.RData")
+#pheno_cd <- phenoData[, c(1:2, 11:16)]
+
+
+# merge pheno, pgs and registry data on ids filtered for trio analysis exclusions:
+
+alldata <- phenoData %>%
+  right_join(trio_pgs)
+
+
+save(alldata, file = "N:/durable/people/Leo/conduct/v1/data/combinedData_new.RData")
+write.table(alldata, file = ("N:/durable/people/Leo/conduct/v1/data/combinedData_new.txt"), quote = FALSE, col.names = T, row.names = F)
+```
+
+
