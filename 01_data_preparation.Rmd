@@ -1,7 +1,7 @@
 ---
 title: "Data preparation conduct problems project"
 author: "Leonard Frach"
-date: "06 June 2023"
+date: "04 September 2023"
 output: pdf_document
 ---
 
@@ -104,7 +104,7 @@ hist(data14y$cdSum14_z)
 
 
 data2 <- data %>%
-  left_join(data14y)
+  full_join(data14y)
 
 cor(data2$cdSum, data2$cdSum14, use = "complete") # low correlation 0.14
 
