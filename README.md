@@ -10,5 +10,6 @@ This is a repository for analyses described in "Examining intergenerational risk
 * 03_Main_analyses_completeData.Rmd - structural equation models and descriptive statistics for analyses using complete data (ages 8 and 14 years) and sensitivity analyses
 * model_SEM.R - example script of structural equation models used for imputed data performed for each type polygenic score separately on Colosssus
 * 03_Main_analyses_MIdata.Rmd - loading model outputs of all SEMs with imputed data, parameter estimates and further descriptive statistics
+* power_trio_new.Rmd - power analyses for polygenic score approach using trios
 
 The pipeline to compute polygenic scores with LDpred2 in MoBa (on TSD HPC Colossus) can be found at https://github.com/AndreAllegrini/LDpred2 
