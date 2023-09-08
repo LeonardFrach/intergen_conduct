@@ -1,0 +1,915 @@
+---
+title: "Simulations for power of trio PGS analyses"
+author: "Andrea Allegrini, Leonard Frach"
+date: "20/02/2023"
+output: html_document
+---
+
+# Simulation test 
+
+Based on Tubbs paper - see https://onlinelibrary.wiley.com/doi/abs/10.1002/gepi.22294
+
+# Different effect sizes and sample sizes (alhpha = 0.05; 1000 iterations)
+```{r}
+library(tidyverse)
+library(lavaan)
+library(foreach)
+library(parallel)
+library(doParallel)
+
+population.model <- function(ec, em, ef) {
+    model <- str_glue('
+  
+#child geno
+Xc ~ 0.5*Xm + 0.5*Xf 
+
+#residual variance  and covariance mother-child-father PRS
+
+Xc ~~ 0.5*Xc
+Xm ~~ 1*Xm
+Xf ~~ 1*Xf
+Xm ~~0*Xf
+
+#Child pheno 
+
+Yc ~ {ec}*Xc + {em}*Xm + {ef}*Xf 
+
+#residual variance child pheno
+
+Yc ~~ (1- ({ec}^2 + {em}^2 + {ef}^2 + {ec}*{em} + {ec}*{ef}))*Yc
+
+# genetic transmission
+gt := 0.5*{ec}
+')
+    return(model)
+}
+
+#sample model 
+
+samp.model <- "
+
+Yc ~ d*Xc + Xm + Xf
+
+gt := 0.5*d
+"
+
+
+# child and parental effects (variance predictred 1% child 0.4% both parents )
+ec = seq(0.04, 0.12, 0.02) 
+em = 0.4*ec
+ef = 0.4*ec
+
+
+#these are estimates used in (part of) the sims in Tubbs. Reasusuringly these yield very close power estimates to those of their paper.
+#ec = sqrt(.002) 
+#em = sqrt(.001)
+#ef = sqrt(.0005)
+
+# simulate the model
+pop.model <- population.model(ec, em, ef)
+
+
+numCores <- detectCores() #detect  number of cores on your local machine
+numCores
+
+
+iter = seq(1000) # how many iterations usually 5k to 10k
+N = seq(10000, 40000, 5000) # sample size
+
+registerDoParallel(numCores - 1)  # set N cores (-1)
+
+set.seed(12345) # to reproduce
+
+writeLines(c(""), "log_sims_TEST.txt") #create log file
+
+
+erRates <- NULL
+erRatesGt <- NULL
+
+for (z in 1:5) {
+    res <- NULL #holds results
+    system.time(res <- foreach(j = N, .combine = rbind) %:%
+                    foreach(i = iter, .combine = rbind) %dopar% { 
+                        
+                        # keep track of iteration progress outside foreach 
+                        if(i %in% seq(0, max(iter), length(iter)/10)){
+                            cat("\n","Iteration", i ,"of", max(iter),"for N = ", j ,"started!", "\n", file = "log_sims_TEST.txt", append = TRUE)
+                        }
+                        
+                        #simulate data with based on common pop model
+                        
+                        
+                        dat <- simulateData(pop.model[z],
+                                            model.type = "lavaan",
+                                            sample.nobs = j, #N 
+                                            return.type = "data.frame",
+                                            standardized = F)
+                        
+                        
+                        fit <- sem(samp.model, data = dat) #fit  model
+                        
+                        x <- parameterestimates(fit, standardized = T) %>% #save regressions
+                            dplyr::filter(op == "~")
+                        
+                        
+                        cbind(x, N = j, iter = i) # bind results
+                        
+                    }
+    )
+    
+    stopImplicitCluster() 
+    
+    saveRDS(res, file = paste0("sim", z, ".rds")) 
+    
+    for(i in unique(res$N)){
+        for(j in unique(res$lhs)){
+            for(k in unique(res$rhs)){
+                
+                erRates <- rbind(erRates, (res %>%
+                                               filter(N == i, lhs == j, rhs == k) %>%
+                                               summarise(power = sum(pvalue < .05)/length(pvalue)) %>%
+                                               cbind(., N = i, trait = j, PRS = k)))
+                
+            }
+        }
+    }
+}
+
+#user  system elapsed 
+# 28.401   2.475   3.371 
+
+
+# repeat for genetic transmission effects
+for (z in 1:5) {
+    res2 <- NULL #holds results
+    system.time(res2 <- foreach(j = N, .combine = rbind) %:%
+                    foreach(i = iter, .combine = rbind) %dopar% { 
+                        
+                        # keep track of iteration progress outside foreach 
+                        if(i %in% seq(0, max(iter), length(iter)/10)){
+                            cat("\n","Iteration", i ,"of", max(iter),"for N = ", j ,"started!", "\n", file = "log_sims_TEST.txt", append = TRUE)
+                        }
+                        
+                        #simulate data with based on common pop model
+                        
+                        
+                        dat <- simulateData(pop.model[z],
+                                            model.type = "lavaan",
+                                            sample.nobs = j, #N 
+                                            return.type = "data.frame",
+                                            standardized = F)
+                        
+                        
+                        fit <- sem(samp.model, data = dat) #fit  model
+                        
+                        x <- parameterestimates(fit, standardized = T) %>% #save regressions
+                            dplyr::filter(op == ":=")
+                        
+                        
+                        cbind(x, N = j, iter = i) # bind results
+                        
+                    }
+    )
+    
+    stopImplicitCluster() 
+    
+    for(i in unique(res2$N)){
+        for(j in unique(res2$lhs)){
+            for(k in unique(res2$rhs)){
+                
+                erRatesGt <- rbind(erRatesGt, (res2 %>%
+                                                   filter(N == i, lhs == j, rhs == k) %>%
+                                                   summarise(power = sum(pvalue < .05)/length(pvalue)) %>%
+                                                   cbind(., N = i, trait = j, PRS = k)))
+                
+            }
+        }
+    }
+}
+```
+
+
+
+# Exact values for specific N (10,000 iterations) alpha = 0.05
+```{r}
+library(tidyverse)
+library(lavaan)
+library(foreach)
+library(parallel)
+library(doParallel)
+
+population.model <- function(ec, em, ef) {
+    model <- str_glue('
+  
+#child geno
+Xc ~ 0.5*Xm + 0.5*Xf 
+
+#residual variance  and covariance mother-child-father PRS
+
+Xc ~~ 0.5*Xc
+Xm ~~ 1*Xm
+Xf ~~ 1*Xf
+Xm ~~0*Xf
+
+#Child pheno 
+
+Yc ~ {ec}*Xc + {em}*Xm + {ef}*Xf 
+
+#residual variance child pheno
+
+Yc ~~ (1- ({ec}^2 + {em}^2 + {ef}^2 + {ec}*{em} + {ec}*{ef}))*Yc
+
+gt := 0.5*{ec} 
+')
+    return(model)
+}
+
+#sample model 
+
+samp.model <- "
+Yc ~ d*Xc + Xm + Xf
+
+gt := 0.5*d
+"
+
+
+# child and parental effects (variance predictred 1% child 0.4% both parents )
+ec = c(0.05, 0.10) 
+em = 0.4*ec
+ef = 0.4*ec
+
+
+# simulate the model
+pop.model <- population.model(ec, em, ef)
+
+
+numCores <- detectCores() #detect  number of cores on your local machine
+numCores
+
+
+iter = seq(10000) # how many iterations usually 5k to 10k
+N = c(15301, 31346) # sample size
+
+registerDoParallel(numCores - 1)  # set N cores (-1)
+
+set.seed(12345) # to reproduce
+
+writeLines(c(""), "log_sims_TEST.txt") #create log file
+
+
+erRates2 <- NULL
+
+for (z in 1:2) {
+    resX <- NULL #holds results
+    system.time(resX <- foreach(j = N, .combine = rbind) %:%
+                    foreach(i = iter, .combine = rbind) %dopar% { 
+                        
+                        # keep track of iteration progress outsied foreach 
+                        if(i %in% seq(0, max(iter), length(iter)/10)){
+                            cat("\n","Iteration", i ,"of", max(iter),"for N = ", j ,"started!", "\n", file = "log_sims_TEST.txt", append = TRUE)
+                        }
+                        
+                        #simulate data with based on common pop model
+                        
+                        
+                        dat <- simulateData(pop.model[z],
+                                            model.type = "lavaan",
+                                            sample.nobs = j, #N 
+                                            return.type = "data.frame",
+                                            standardized = F)
+                        
+                        
+                        fit <- sem(samp.model, data = dat) #fit  model
+                        
+                        x <- parameterestimates(fit, standardized = T) %>% #save regressions
+                            dplyr::filter(op == "~")
+                        
+                        
+                        cbind(x, N = j, iter = i) # bind results
+                        
+                    })
+    
+    stopImplicitCluster() 
+    
+    saveRDS(resX, file = paste0("sim", z, ".rds")) 
+    
+    for(i in unique(resX$N)){
+        for(j in unique(resX$lhs)){
+            for(k in unique(resX$rhs)){
+                
+                erRates2 <- rbind(erRates2, (resX %>%
+                                                 filter(N == i, lhs == j, rhs == k) %>%
+                                                 summarise(power = sum(pvalue < .05)/length(pvalue)) %>%
+                                                 cbind(., N = i, trait = j, PRS = k)))
+                
+            }
+        }
+    }
+}
+
+
+# genetic transmission
+erRates2Gt <- NULL
+
+for (z in 1:2) {
+    resX2 <- NULL #holds results
+    system.time(resX2 <- foreach(j = N, .combine = rbind) %:%
+                    foreach(i = iter, .combine = rbind) %dopar% { 
+                        
+                        # keep track of iteration progress outsied foreach 
+                        if(i %in% seq(0, max(iter), length(iter)/10)){
+                            cat("\n","Iteration", i ,"of", max(iter),"for N = ", j ,"started!", "\n", file = "log_sims_TEST.txt", append = TRUE)
+                        }
+                        
+                        #simulate data with based on common pop model
+                        
+                        
+                        dat <- simulateData(pop.model[z],
+                                            model.type = "lavaan",
+                                            sample.nobs = j, #N 
+                                            return.type = "data.frame",
+                                            standardized = F)
+                        
+                        
+                        fit <- sem(samp.model, data = dat) #fit  model
+                        
+                        x <- parameterestimates(fit, standardized = T) %>% #save regressions
+                            dplyr::filter(op == ":=")
+                        
+                        
+                        cbind(x, N = j, iter = i) # bind results
+                        
+                    })
+    
+    stopImplicitCluster() 
+    
+    saveRDS(resX2, file = paste0("sim", z, ".rds")) 
+    
+    for(i in unique(resX2$N)){
+        for(j in unique(resX2$lhs)){
+            for(k in unique(resX2$rhs)){
+                
+                erRates2Gt <- rbind(erRates2Gt, (resX2 %>%
+                                                 filter(N == i, lhs == j, rhs == k) %>%
+                                                 summarise(power = sum(pvalue < .05)/length(pvalue)) %>%
+                                                 cbind(., N = i, trait = j, PRS = k)))
+                
+            }
+        }
+    }
+}
+```
+
+
+
+# Plot the curves
+```{r}
+# add info on effect sizes
+df <- erRates 
+df$effect_sizes <- rep(seq(0.04, 0.12, 0.02), each = 21)
+
+power_curves_child <- df %>% filter(PRS == "Xc")
+power_curves_parent <- df %>% filter(PRS == "Xm" | PRS == "Xf")
+power_curves_parent$mod <- rep(1:35, each = 2)
+
+dfGt <- erRatesGt
+dfGt$effect_sizes <- rep(seq(0.04, 0.12, 0.02), each = 7)
+power_curves_gt <- dfGt
+
+df2 <- power_curves_parent %>% pivot_wider(names_from = c(mod), values_from = c(power))
+df2sum <- df2 %>% select(-c(1:4)) %>% colMeans(na.rm = T)
+
+power_curves_parent <- df %>% filter(PRS == "Xm")
+power_curves_parent$power <- round(df2sum, 3)
+
+power_curves_child <- power_curves_child %>%
+    mutate(effect_sizes = as.factor(effect_sizes))
+
+# for plotting, set parental effect sizes to strength 0.4 times of child effects
+power_curves_parent <- power_curves_parent %>%
+    mutate(effect_sizes = as.factor(0.4*effect_sizes))
+
+power_curves_gt <- power_curves_gt %>%
+    mutate(effect_sizes = as.factor(0.5*effect_sizes))
+
+library(wesanderson)
+library(colorBlindness)
+
+
+colorBlindness::availablePalette()
+colorBlindness::displayAllColors(paletteMartin)
+
+cols <- paletteMartin
+cols
+# Black    SherpaBlue  PersianGreen       HotPink   CottonCandy PigmentIndigo   ScienceBlue    Heliotrope        Malibu    FrenchPass      RedBerry 
+cols <- c("#000000",  "#009292" , "#ff6db6"  ,  "#490092", "#db6d00" ) 
+
+
+png(filename = "power_child_alpha.png", width = 2000, height = 1500, type = "cairo", res = 250)
+pwr_child <- ggplot(power_curves_child, 
+                    aes(x = N,
+                        y = power, 
+                        col = effect_sizes)) + 
+    geom_line()  + 
+    geom_hline(yintercept = 0.8, linetype = 2) + 
+    geom_vline(xintercept = 15320, linetype = 3) + 
+    geom_vline(xintercept = 31290, linetype = 3) + 
+    scale_y_continuous(breaks = seq(0, 1, 0.1), limits = c(0, 1)) + #this line change the frequency of tick marks
+    scale_x_continuous(breaks = seq(10000, 40000, 5000), limits = c(10000, 40000)) + #this changes the limits of x
+    scale_color_manual(values =  cols) +
+    labs(col = "Beta", x = "N trios", y = "Power")
+pwr_child
+dev.off()
+
+png(filename = "power_geneticTransmission_alpha.png", width = 2000, height = 1500, type = "cairo", res = 250)
+pwr_gt <- ggplot(power_curves_gt, 
+                  aes(x = N,
+                      y = power, 
+                      col = effect_sizes)) + 
+    geom_line()  + 
+    geom_hline(yintercept = 0.8, linetype = 2) + 
+    geom_vline(xintercept = 15320, linetype = 3) + 
+    geom_vline(xintercept = 31290, linetype = 3) + 
+    scale_y_continuous(breaks = seq(0, 1, 0.1), limits = c(0, 1)) + #this line change the frequency of tick marks
+    scale_x_continuous(breaks = seq(10000, 40000, 5000), limits = c(10000, 40000)) + #this changes the limits of x
+    scale_color_manual(values =  cols) +
+    labs(col = "Beta", x = "N trios", y = "Power")
+pwr_gt
+dev.off()
+
+png(filename = "power_geneticNurture_alpha.png", width = 2000, height = 1500, type = "cairo", res = 250)
+pwr_par <- ggplot(power_curves_parent, 
+                  aes(x = N,
+                      y = power, 
+                      col = effect_sizes)) + 
+    geom_line()  + 
+    geom_hline(yintercept = 0.8, linetype = 2) + 
+    geom_vline(xintercept = 15320, linetype = 3) + 
+    geom_vline(xintercept = 31290, linetype = 3) + 
+    scale_y_continuous(breaks = seq(0, 1, 0.1), limits = c(0, 1)) + #this line change the frequency of tick marks
+    scale_x_continuous(breaks = seq(10000, 40000, 5000), limits = c(10000, 40000)) + #this changes the limits of x
+    scale_color_manual(values =  cols) +
+    labs(col = "Beta", x = "N trios", y = "Power")
+pwr_par
+dev.off()
+
+png(filename = "FigureS5.png", width = 12000, height = 5000, type = "cairo", res = 1000)
+cowplot::plot_grid(pwr_child, pwr_gt, pwr_par, labels = c("A", "B", "C"), ncol = 3, nrow = 1)
+dev.off()
+
+```
+
+
+
+
+# Different effect sizes and sample sizes (Bonferroni-corrected; 1000 iterations)
+```{r}
+library(tidyverse)
+library(lavaan)
+library(foreach)
+library(parallel)
+library(doParallel)
+
+population.model <- function(ec, em, ef) {
+    model <- str_glue('
+  
+#child geno
+Xc ~ 0.5*Xm + 0.5*Xf 
+
+#residual variance  and covariance mother-child-father PRS
+
+Xc ~~ 0.5*Xc
+Xm ~~ 1*Xm
+Xf ~~ 1*Xf
+Xm ~~0*Xf
+
+#Child pheno 
+
+Yc ~ {ec}*Xc + {em}*Xm + {ef}*Xf 
+
+#residual variance child pheno
+
+Yc ~~ (1- ({ec}^2 + {em}^2 + {ef}^2 + {ec}*{em} + {ec}*{ef}))*Yc
+
+# genetic transmission
+gt := 0.5*{ec}
+')
+    return(model)
+}
+
+#sample model 
+
+samp.model <- "
+
+Yc ~ d*Xc + Xm + Xf
+
+gt := 0.5*d
+"
+
+
+# child and parental effects (variance predictred 1% child 0.4% both parents )
+ec = seq(0.04, 0.12, 0.02) 
+em = 0.4*ec
+ef = 0.4*ec
+
+
+#these are estimates used in (part of) the sims in Tubbs. Reasusuringly these yield very close power estimates to those of their paper.
+#ec = sqrt(.002) 
+#em = sqrt(.001)
+#ef = sqrt(.0005)
+
+# simulate the model
+pop.model <- population.model(ec, em, ef)
+
+
+numCores <- detectCores() #detect  number of cores on your local machine
+numCores
+
+
+iter = seq(1000) # how many iterations usually 5k to 10k
+N = seq(10000, 40000, 5000) # sample size
+
+registerDoParallel(numCores - 1)  # set N cores (-1)
+
+set.seed(12345) # to reproduce
+
+writeLines(c(""), "log_sims_TEST.txt") #create log file
+
+
+erRates <- NULL
+erRatesGt <- NULL
+
+for (z in 1:5) {
+    res <- NULL #holds results
+    system.time(res <- foreach(j = N, .combine = rbind) %:%
+                    foreach(i = iter, .combine = rbind) %dopar% { 
+                        
+                        # keep track of iteration progress outside foreach 
+                        if(i %in% seq(0, max(iter), length(iter)/10)){
+                            cat("\n","Iteration", i ,"of", max(iter),"for N = ", j ,"started!", "\n", file = "log_sims_TEST.txt", append = TRUE)
+                        }
+                        
+                        #simulate data with based on common pop model
+                        
+                        
+                        dat <- simulateData(pop.model[z],
+                                            model.type = "lavaan",
+                                            sample.nobs = j, #N 
+                                            return.type = "data.frame",
+                                            standardized = F)
+                        
+                        
+                        fit <- sem(samp.model, data = dat) #fit  model
+                        
+                        x <- parameterestimates(fit, standardized = T) %>% #save regressions
+                            dplyr::filter(op == "~")
+                        
+                        
+                        cbind(x, N = j, iter = i) # bind results
+                        
+                    }
+    )
+    
+    stopImplicitCluster() 
+    
+    saveRDS(res, file = paste0("sim", z, ".rds")) 
+    
+    for(i in unique(res$N)){
+        for(j in unique(res$lhs)){
+            for(k in unique(res$rhs)){
+                
+                erRates <- rbind(erRates, (res %>%
+                                               filter(N == i, lhs == j, rhs == k) %>%
+                                               summarise(power = sum(pvalue < .05/12)/length(pvalue)) %>%
+                                               cbind(., N = i, trait = j, PRS = k)))
+                
+            }
+        }
+    }
+}
+
+#user  system elapsed 
+# 28.401   2.475   3.371 
+
+
+# repeat for genetic transmission effects
+for (z in 1:5) {
+    res2 <- NULL #holds results
+    system.time(res2 <- foreach(j = N, .combine = rbind) %:%
+                    foreach(i = iter, .combine = rbind) %dopar% { 
+                        
+                        # keep track of iteration progress outside foreach 
+                        if(i %in% seq(0, max(iter), length(iter)/10)){
+                            cat("\n","Iteration", i ,"of", max(iter),"for N = ", j ,"started!", "\n", file = "log_sims_TEST.txt", append = TRUE)
+                        }
+                        
+                        #simulate data with based on common pop model
+                        
+                        
+                        dat <- simulateData(pop.model[z],
+                                            model.type = "lavaan",
+                                            sample.nobs = j, #N 
+                                            return.type = "data.frame",
+                                            standardized = F)
+                        
+                        
+                        fit <- sem(samp.model, data = dat) #fit  model
+                        
+                        x <- parameterestimates(fit, standardized = T) %>% #save regressions
+                            dplyr::filter(op == ":=")
+                        
+                        
+                        cbind(x, N = j, iter = i) # bind results
+                        
+                    }
+    )
+    
+    stopImplicitCluster() 
+    
+    for(i in unique(res2$N)){
+        for(j in unique(res2$lhs)){
+            for(k in unique(res2$rhs)){
+                
+                erRatesGt <- rbind(erRatesGt, (res2 %>%
+                                                   filter(N == i, lhs == j, rhs == k) %>%
+                                                   summarise(power = sum(pvalue < .05/12)/length(pvalue)) %>%
+                                                   cbind(., N = i, trait = j, PRS = k)))
+                
+            }
+        }
+    }
+}
+```
+
+
+
+# Exact values for specific N (10,000 iterations) Bonferroni-corrected
+```{r}
+library(tidyverse)
+library(lavaan)
+library(foreach)
+library(parallel)
+library(doParallel)
+
+population.model <- function(ec, em, ef) {
+    model <- str_glue('
+  
+#child geno
+Xc ~ 0.5*Xm + 0.5*Xf 
+
+#residual variance  and covariance mother-child-father PRS
+
+Xc ~~ 0.5*Xc
+Xm ~~ 1*Xm
+Xf ~~ 1*Xf
+Xm ~~0*Xf
+
+#Child pheno 
+
+Yc ~ {ec}*Xc + {em}*Xm + {ef}*Xf 
+
+#residual variance child pheno
+
+Yc ~~ (1- ({ec}^2 + {em}^2 + {ef}^2 + {ec}*{em} + {ec}*{ef}))*Yc
+
+gt := 0.5*{ec} 
+')
+    return(model)
+}
+
+#sample model 
+
+samp.model <- "
+Yc ~ d*Xc + Xm + Xf
+
+gt := 0.5*d
+"
+
+
+# child and parental effects (variance predictred 1% child 0.4% both parents )
+ec = c(0.05, 0.10) 
+em = 0.4*ec
+ef = 0.4*ec
+
+
+# simulate the model
+pop.model <- population.model(ec, em, ef)
+
+
+numCores <- detectCores() #detect  number of cores on your local machine
+numCores
+
+
+iter = seq(10000) # how many iterations usually 5k to 10k
+N = c(15320, 31290) # sample size
+
+registerDoParallel(numCores - 1)  # set N cores (-1)
+
+set.seed(12345) # to reproduce
+
+writeLines(c(""), "log_sims_TEST.txt") #create log file
+
+
+erRates2 <- NULL
+
+for (z in 1:2) {
+    resX <- NULL #holds results
+    system.time(resX <- foreach(j = N, .combine = rbind) %:%
+                    foreach(i = iter, .combine = rbind) %dopar% { 
+                        
+                        # keep track of iteration progress outsied foreach 
+                        if(i %in% seq(0, max(iter), length(iter)/10)){
+                            cat("\n","Iteration", i ,"of", max(iter),"for N = ", j ,"started!", "\n", file = "log_sims_TEST.txt", append = TRUE)
+                        }
+                        
+                        #simulate data with based on common pop model
+                        
+                        
+                        dat <- simulateData(pop.model[z],
+                                            model.type = "lavaan",
+                                            sample.nobs = j, #N 
+                                            return.type = "data.frame",
+                                            standardized = F)
+                        
+                        
+                        fit <- sem(samp.model, data = dat) #fit  model
+                        
+                        x <- parameterestimates(fit, standardized = T) %>% #save regressions
+                            dplyr::filter(op == "~")
+                        
+                        
+                        cbind(x, N = j, iter = i) # bind results
+                        
+                    })
+    
+    stopImplicitCluster() 
+    
+    saveRDS(resX, file = paste0("sim", z, ".rds")) 
+    
+    for(i in unique(resX$N)){
+        for(j in unique(resX$lhs)){
+            for(k in unique(resX$rhs)){
+                
+                erRates2 <- rbind(erRates2, (resX %>%
+                                                 filter(N == i, lhs == j, rhs == k) %>%
+                                                 summarise(power = sum(pvalue < .05/12)/length(pvalue)) %>%
+                                                 cbind(., N = i, trait = j, PRS = k)))
+                
+            }
+        }
+    }
+}
+
+
+# genetic transmission
+erRates2Gt <- NULL
+
+for (z in 1:2) {
+    resX2 <- NULL #holds results
+    system.time(resX2 <- foreach(j = N, .combine = rbind) %:%
+                    foreach(i = iter, .combine = rbind) %dopar% { 
+                        
+                        # keep track of iteration progress outsied foreach 
+                        if(i %in% seq(0, max(iter), length(iter)/10)){
+                            cat("\n","Iteration", i ,"of", max(iter),"for N = ", j ,"started!", "\n", file = "log_sims_TEST.txt", append = TRUE)
+                        }
+                        
+                        #simulate data with based on common pop model
+                        
+                        
+                        dat <- simulateData(pop.model[z],
+                                            model.type = "lavaan",
+                                            sample.nobs = j, #N 
+                                            return.type = "data.frame",
+                                            standardized = F)
+                        
+                        
+                        fit <- sem(samp.model, data = dat) #fit  model
+                        
+                        x <- parameterestimates(fit, standardized = T) %>% #save regressions
+                            dplyr::filter(op == ":=")
+                        
+                        
+                        cbind(x, N = j, iter = i) # bind results
+                        
+                    })
+    
+    stopImplicitCluster() 
+    
+    saveRDS(resX2, file = paste0("sim", z, ".rds")) 
+    
+    for(i in unique(resX2$N)){
+        for(j in unique(resX2$lhs)){
+            for(k in unique(resX2$rhs)){
+                
+                erRates2Gt <- rbind(erRates2Gt, (resX2 %>%
+                                                 filter(N == i, lhs == j, rhs == k) %>%
+                                                 summarise(power = sum(pvalue < .05/12)/length(pvalue)) %>%
+                                                 cbind(., N = i, trait = j, PRS = k)))
+                
+            }
+        }
+    }
+}
+```
+
+
+
+# Plot the curves
+```{r}
+# add info on effect sizes
+df <- erRates 
+df$effect_sizes <- rep(seq(0.04, 0.12, 0.02), each = 21)
+
+power_curves_child <- df %>% filter(PRS == "Xc")
+power_curves_parent <- df %>% filter(PRS == "Xm" | PRS == "Xf")
+power_curves_parent$mod <- rep(1:35, each = 2)
+
+dfGt <- erRatesGt
+dfGt$effect_sizes <- rep(seq(0.04, 0.12, 0.02), each = 7)
+power_curves_gt <- dfGt
+
+df2 <- power_curves_parent %>% pivot_wider(names_from = c(mod), values_from = c(power))
+df2sum <- df2 %>% select(-c(1:4)) %>% colMeans(na.rm = T)
+
+power_curves_parent <- df %>% filter(PRS == "Xm")
+power_curves_parent$power <- round(df2sum, 3)
+
+power_curves_child <- power_curves_child %>%
+    mutate(effect_sizes = as.factor(effect_sizes))
+
+# for plotting, set parental effect sizes to strength 0.4 times of child effects
+power_curves_parent <- power_curves_parent %>%
+    mutate(effect_sizes = as.factor(0.4*effect_sizes))
+
+power_curves_gt <- power_curves_gt %>%
+    mutate(effect_sizes = as.factor(0.5*effect_sizes))
+
+library(wesanderson)
+library(colorBlindness)
+
+
+colorBlindness::availablePalette()
+#colorBlindness::displayAllColors(paletteMartin)
+
+cols <- paletteMartin
+cols
+# Black    SherpaBlue  PersianGreen       HotPink   CottonCandy PigmentIndigo   ScienceBlue    Heliotrope        Malibu    FrenchPass      RedBerry 
+cols <- c("#000000",  "#009292" , "#ff6db6"  ,  "#490092", "#db6d00" ) 
+
+
+png(filename = "power_child_Bonf.png", width = 2000, height = 1500, type = "cairo", res = 250)
+pwr_child <- ggplot(power_curves_child, 
+                    aes(x = N,
+                        y = power, 
+                        col = effect_sizes)) + 
+    geom_line()  + 
+    geom_hline(yintercept = 0.8, linetype = 2) + 
+    geom_vline(xintercept = 15320, linetype = 3) + 
+    geom_vline(xintercept = 31290, linetype = 3) + 
+    scale_y_continuous(breaks = seq(0, 1, 0.1), limits = c(0, 1)) + #this line change the frequency of tick marks
+    scale_x_continuous(breaks = seq(10000, 40000, 5000), limits = c(10000, 40000)) + #this changes the limits of x
+    scale_color_manual(values =  cols) +
+    labs(col = "Beta", x = "N trios", y = "Power")
+pwr_child
+dev.off()
+
+png(filename = "power_geneticTransmission_Bonf.png", width = 2000, height = 1500, type = "cairo", res = 250)
+pwr_gt <- ggplot(power_curves_gt, 
+                  aes(x = N,
+                      y = power, 
+                      col = effect_sizes)) + 
+    geom_line()  + 
+    geom_hline(yintercept = 0.8, linetype = 2) + 
+    geom_vline(xintercept = 15320, linetype = 3) + 
+    geom_vline(xintercept = 31290, linetype = 3) + 
+    scale_y_continuous(breaks = seq(0, 1, 0.1), limits = c(0, 1)) + #this line change the frequency of tick marks
+    scale_x_continuous(breaks = seq(10000, 40000, 5000), limits = c(10000, 40000)) + #this changes the limits of x
+    scale_color_manual(values =  cols) +
+    labs(col = "Beta", x = "N trios", y = "Power")
+pwr_gt
+dev.off()
+
+png(filename = "power_geneticNurture_Bonf.png", width = 2000, height = 1500, type = "cairo", res = 250)
+pwr_par <- ggplot(power_curves_parent, 
+                  aes(x = N,
+                      y = power, 
+                      col = effect_sizes)) + 
+    geom_line()  + 
+    geom_hline(yintercept = 0.8, linetype = 2) + 
+    geom_vline(xintercept = 15320, linetype = 3) + 
+    geom_vline(xintercept = 31290, linetype = 3) + 
+    scale_y_continuous(breaks = seq(0, 1, 0.1), limits = c(0, 1)) + #this line change the frequency of tick marks
+    scale_x_continuous(breaks = seq(10000, 40000, 5000), limits = c(10000, 40000)) + #this changes the limits of x
+    scale_color_manual(values =  cols) +
+    labs(col = "Beta", x = "N trios", y = "Power")
+pwr_par
+dev.off()
+
+png(filename = "FigureS6.png", width = 12000, height = 5000, type = "cairo", res = 1000)
+cowplot::plot_grid(pwr_child, pwr_gt, pwr_par, labels = c("A", "B", "C"), ncol = 3, nrow = 1)
+dev.off()
+
+```
+
+
