@@ -330,27 +330,27 @@ psych::alpha(polycorr$rho)
 
 
 # load age 14y data
-load("N:/durable/people/Leo/conduct/v1/data/phenoData.RData")
+load("N:/durable/people/Leo/conduct/v1/data/combinedData_new2.RData")
 
 
-phenoData <- phenoData %>% select(c(PREG_ID_2306, BARN_NR, UB127:UB134))
-
-MIdata <- left_join(MIdata, phenoData)
+# phenoData <- alldata %>% select(c(PREG_ID_2306, BARN_NR, UB127:UB134))
+# 
+# MIdata <- left_join(MIdata, phenoData)
 
 
 # missingness on items
 
-table(is.na(MIdata$UB127)) / nrow(MIdata)
-table(is.na(MIdata$UB128)) / nrow(MIdata)
-table(is.na(MIdata$UB129)) / nrow(MIdata)
-table(is.na(MIdata$UB130)) / nrow(MIdata)
-table(is.na(MIdata$UB131)) / nrow(MIdata)
-table(is.na(MIdata$UB132)) / nrow(MIdata)
-table(is.na(MIdata$UB133)) / nrow(MIdata)
-table(is.na(MIdata$UB134)) / nrow(MIdata)
+table(is.na(alldata$UB127)) / nrow(alldata)
+table(is.na(alldata$UB128)) / nrow(alldata)
+table(is.na(alldata$UB129)) / nrow(alldata)
+table(is.na(alldata$UB130)) / nrow(alldata)
+table(is.na(alldata$UB131)) / nrow(alldata)
+table(is.na(alldata$UB132)) / nrow(alldata)
+table(is.na(alldata$UB133)) / nrow(alldata)
+table(is.na(alldata$UB134)) / nrow(alldata)
 
 # missingness on all items
-(completePheno <- MIdata %>% 
+(completePheno <- alldata %>% 
     mutate(across(UB127:UB134, ~ as.numeric(.))) %>% 
     mutate(sum = rowSums(across(UB127:UB134), na.rm = F)) %>%
     filter(sum > 0))
@@ -362,7 +362,7 @@ round(table(completePheno$KJONN) / nrow(completePheno), 3)
 
 
 # any item data
-(anyPheno <- MIdata %>% 
+(anyPheno <- alldata %>% 
     mutate(across(UB127:UB134, ~ as.numeric(.))) %>% 
     mutate(sum = rowSums(across(UB127:UB134), na.rm = T)) %>%
     filter(sum > 0))
@@ -370,14 +370,14 @@ nrow(anyPheno)
 
 round(table(anyPheno$KJONN) / nrow(anyPheno), 3)
 
-1 - nrow(anyPheno) / nrow(MIdata)
+1 - nrow(anyPheno) / nrow(alldata)
 
-# 6266 individuals with any phenotype data
+# 8035 individuals with any phenotype data
 
 
 
 # means and SDs
-(descript_14y <- MIdata %>% 
+(descript_14y <- alldata %>% 
   select(UB127:UB134) %>% mutate_all(as.numeric) %>%
   psych::describe())
 
@@ -854,16 +854,15 @@ dev.off()
 
 setwd("N:/durable/people/Leo/conduct/v1/output/")
 
-
-pdf("Figure_main_complete_vs_MI.pdf", height = 5800, width = 9100)
+pdf("Figure_main_complete_vs_MI.pdf", width = 11)
 plot4 + 
   scale_y_discrete(limits = rev) + 
   scale_colour_manual(values = pal) + 
   scale_x_continuous(limits = c(-.075, .10), oob = scales::squish) +
-  theme(text = element_text(size = 14),
-        axis.text.x = element_text(size = 10), 
+  theme(text = element_text(size = 15),
+        axis.text.x = element_text(size = 12), 
         strip.text.y = element_text(size = 12), 
-        legend.text = element_text(size = 11),
+        legend.text = element_text(size = 12),
         legend.title = element_text(size = 12))
 
 dev.off()

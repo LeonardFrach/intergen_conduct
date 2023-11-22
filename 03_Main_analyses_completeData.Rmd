@@ -9,11 +9,11 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 
 setwd("N:/durable/people/Leo/conduct/v1")
-load("data/combinedData_new.RData") # non-imputed data
+load("data/combinedData_new2.RData") # non-imputed data
 ```
 
 
-# Measurement models
+# Measurment models
 ```{r}
 library(dplyr)
 library(lavaan)
@@ -82,6 +82,19 @@ MIdata <- MIdata %>% mutate(KJONN = as.character(KJONN) %>% as.factor())
 # percent male/female
 round(table(MIdata$KJONN) / nrow(MIdata), 3)
 
+
+## cronbach's alpha
+library(Hmisc)
+
+cd_scale <- MIdata %>% select("NN111":"NN118")
+
+# Alpha ordinal
+polycorr <- psych::polychoric(cd_scale)
+psych::alpha(polycorr$rho)
+
+# std. alpha = 0.88
+
+
 ```
 
 
@@ -118,12 +131,12 @@ for (i in 1:length(vars)) {
   )
   
   sem_fit_trio <- sem(model = sem_trio, data = MIdata, std.lv = T)
-  
+
   # compare with models where total_f = 
   
     # outputs
   out_sem_trio <- parameterEstimates(sem_fit_trio, standardized = T)
-  
+
   results_sem_trio[7*i-6, ] <- out_sem_trio[out_sem_trio$label == "c1", ]
   results_sem_trio[7*i-5, ] <- out_sem_trio[out_sem_trio$label == "fnt", ]
   results_sem_trio[7*i-4, ] <- out_sem_trio[out_sem_trio$label == "mnt", ]
@@ -182,6 +195,8 @@ results_sem_trio <- results_sem_trio[, -c(1:3)]
 child_effects <- child_effects[, -c(1:3)]
 genetic_nurture <- genetic_nurture[, -c(1:3)]
 genetic_transmis <- genetic_transmis[, -c(1:3)]
+
+
 
 ## Test to show that genetic nurture + genetic transmission = total parental effect in univariate models
 
@@ -309,6 +324,39 @@ polycorr <- psych::polychoric(cd_scale_14y)
 psych::alpha(polycorr$rho)
 
 # std. alpha = 0.90
+
+
+# Correlation between age 8 and age 14 items
+
+scales <- MIdata %>% 
+  select(c("NN111":"NN118", "UB127":"UB134")) %>%
+  mutate_all(., as.numeric)
+
+cor_scales <- cor(scales, use = "pairwise.complete.obs", method = "spearman")
+cor_scales <- cor_scales[9:16, 1:8]
+
+
+data_cor <- MIdata %>% 
+  mutate_at(c("NN111","NN112", "NN113", "NN114", "NN115", "NN116", "NN117","NN118", 
+              "UB127","UB128", "UB129", "UB130", "UB131", "UB132", "UB133","UB134"), as.numeric) 
+
+
+# correlation between latent factors
+
+mod_cor = c(
+  "conduct_8 =~ NN111 + NN112 + NN113 + NN114 + NN115 + NN116 + NN117 + NN118",
+  "conduct_14 =~ UB127 + UB128 + UB129 + UB130 + UB131 + UB132 + UB133 + UB134",
+  
+  "conduct_8 ~~ conduct_14"
+)
+
+
+cor_factors <- cfa(model = mod_cor, data = data_cor, missing = "fiml")
+# only using individuals with some phenotypic data
+
+pe_cor <- parameterEstimates(cor_factors, standardized = T)
+# correlation between latent factors = 0.23
+# without FIML correlation is almost the same (0.22)
 
 
 # empty results data frame
@@ -917,7 +965,7 @@ plot3 +
 dev.off()
 
 
-pdf("Figure_main_complete.pdf", height = 5700, width = 7500)
+pdf("Figure_main_complete.pdf")
 plot3 + 
   scale_y_discrete(limits = rev) + 
   scale_colour_manual(values = pal) + 
@@ -950,22 +998,22 @@ plot3a <- ggplot(dfPlot, aes(group = Type)) +
 
 
 # calculate % of genetic nurture in relation to direct genetic effects
-library(tidyr)
-dfPlot_wide <- dfPlot %>% dplyr::select(c("label", "std.lv", "Trait")) %>%
-  pivot_wider(values_from = c(std.lv), names_from = Trait) %>% t() %>% as.data.frame()
-
-colnames(dfPlot_wide) <- dfPlot_wide[1, ]
-dfPlot_wide <- dfPlot_wide[-1, ]
-
-dfPlot_wide$c1 <- as.numeric(dfPlot_wide$c1)
-dfPlot_wide$mnt <- as.numeric(dfPlot_wide$mnt)
-dfPlot_wide$fnt <- as.numeric(dfPlot_wide$fnt)
-
-(perc_mnt <- round(dfPlot_wide$mnt/dfPlot_wide$c, 2))
-perc_mnt <- ifelse(perc_mnt > 1, NA, perc_mnt) # anxiety direct effect is not significant and tiny
-
-(perc_fnt <- round(dfPlot_wide$fnt/dfPlot_wide$c, 2))
-perc_fnt <- ifelse(perc_fnt > 1, NA, perc_fnt) # anxiety direct effect is not significant and tiny
+# library(tidyr)
+# dfPlot_wide <- dfPlot %>% dplyr::select(c("label", "std.lv", "Trait")) %>%
+#   pivot_wider(values_from = c(std.lv), names_from = Trait) %>% t() %>% as.data.frame()
+# 
+# colnames(dfPlot_wide) <- dfPlot_wide[1, ]
+# dfPlot_wide <- dfPlot_wide[-1, ]
+# 
+# dfPlot_wide$c1 <- as.numeric(dfPlot_wide$c1)
+# dfPlot_wide$mnt <- as.numeric(dfPlot_wide$mnt)
+# dfPlot_wide$fnt <- as.numeric(dfPlot_wide$fnt)
+# 
+# (perc_mnt <- round(dfPlot_wide$mnt/dfPlot_wide$c, 2))
+# perc_mnt <- ifelse(perc_mnt > 1, NA, perc_mnt) # anxiety direct effect is not significant and tiny
+# 
+# (perc_fnt <- round(dfPlot_wide$fnt/dfPlot_wide$c, 2))
+# perc_fnt <- ifelse(perc_fnt > 1, NA, perc_fnt) # anxiety direct effect is not significant and tiny
 
 
 # age 14y
@@ -990,7 +1038,7 @@ genetic_nurture_14y$Class <- rep(child_effects_14y$Class, each = 2)
 genetic_transmis_14y$Role <- rep(c("Father", "Mother"), each = 13)
 genetic_transmis_14y$Type <- "Genetic transmission"
 genetic_transmis_14y$Trait <- rep(vars, times = 2)
-genetic_transmis_14y$Class <- rep(child_effects$Class, times = 2)
+genetic_transmis_14y$Class <- rep(child_effects_14y$Class, times = 2)
 
 
 dfPlot_14y <- rbind(child_effects_14y, genetic_nurture_14y, genetic_transmis_14y)
@@ -1048,7 +1096,7 @@ plot3b <- ggplot(dfPlot_14y, aes(group = Type)) +
 
 setwd("N:/durable/people/Leo/conduct/v1/output/")
 
-png("Figure_main_complete_14y.png", height = 5700, width = 7700, res = 900, type = "cairo")
+png("Figure_main_complete_14y_8k.png", height = 5700, width = 7700, res = 900, type = "cairo")
 plot3b + 
   scale_y_discrete(limits = rev) + 
   scale_colour_manual(values = pal) + 
@@ -1062,7 +1110,7 @@ plot3b +
 dev.off()
 
 
-pdf("Figure_main_complete_14y.pdf", height = 5700, width = 7700)
+pdf("Figure_main_complete_14y.pdf")
 plot3b + 
   scale_y_discrete(limits = rev) + 
   scale_colour_manual(values = pal) + 
@@ -1081,23 +1129,23 @@ dev.off()
 plot3a2 <- plot3 + 
   scale_y_discrete(limits = rev) + 
   scale_colour_manual(values = pal) + 
-  scale_x_continuous(limits = c(-.075, .10), oob = scales::squish) +
+  scale_x_continuous(limits = c(-.08, .11), oob = scales::squish) +
   theme(text = element_text(size = 15),
-        axis.text.x = element_text(size = 11), 
+        axis.text.x = element_text(size = 12), 
         strip.text.y = element_text(size = 12),
-        legend.text = element_text(size = 11),
-        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 13),
         legend.position = "bottom")
 
 plot3b2 <- plot3b + 
   scale_y_discrete(limits = rev) + 
   scale_colour_manual(values = pal) + 
-  scale_x_continuous(limits = c(-.10, .125), oob = scales::squish) +
+  scale_x_continuous(limits = c(-.08, .11), oob = scales::squish) +
   theme(text = element_text(size = 15),
-        axis.text.x = element_text(size = 11), 
+        axis.text.x = element_text(size = 12), 
         strip.text.y = element_text(size = 12), 
-        legend.text = element_text(size = 11),
-        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 13),
         legend.position = "bottom")
 
 setwd("N:/durable/people/Leo/conduct/v1/output/")
@@ -1106,7 +1154,7 @@ png("Figure_3ab.png", height = 6300, width = 11500, res = 900, type = "cairo")
 cowplot::plot_grid(plot3a2, plot3b2, labels=c("A", "B"), ncol = 2, nrow = 1)
 dev.off()
 
-pdf("Figure_3ab.pdf", height = 6300, width = 11500)
+pdf("Figure_3ab.pdf", width = 14)
 cowplot::plot_grid(plot3a2, plot3b2, labels=c("A", "B"), ncol = 2, nrow = 1)
 dev.off()
 
