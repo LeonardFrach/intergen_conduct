@@ -17,7 +17,8 @@ model <- function(y) {
             processed_prs$PC3 + processed_prs$PC4 + processed_prs$PC5 + 
             processed_prs$PC6 + processed_prs$PC7 + processed_prs$PC8 + 
             processed_prs$PC9 + processed_prs$PC10 + processed_prs$genotyping_batch + 
-            processed_prs$Plate_id + processed_prs$imputation_batch, 
+            processed_prs$Plate_id + processed_prs$imputation_batch +
+              processed_prs$sex, processed_prs$YOB, 
           na.action = na.exclude)
   return(rstandard(m))
 }
